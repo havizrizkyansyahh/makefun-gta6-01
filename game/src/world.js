@@ -222,6 +222,20 @@ export class World {
 
   // ------------------------------------------------------------ the step
   step(dt, input) {
+    // the weapon wheel: hold Tab, time slows, the mouse points at a weapon instead of the camera
+    const wheel = this.hud.weapons;
+    const p0 = this.player;
+    if (input.down('Tab') && !p0.dead && !wheel.open) wheel.openWheel(p0);
+    if (wheel.open) {
+      wheel.point(input.mouseDX, input.mouseDY, p0);
+      ['fist', 'pistol', 'smg', 'shotgun'].forEach((k, i) => { if (input.hit(`Digit${i + 1}`) && p0.weapons[k].owned) wheel.choice = k; });
+      input.mouseDX = 0;
+      input.mouseDY = 0;
+      if (!input.down('Tab')) {
+        const k = wheel.closeWheel();
+        if (k && k !== p0.current) p0.select(k);
+      } else dt *= 0.25;
+    }
     this.time += dt;
     this.stats.played += dt;
     this.hour = (this.hour + (dt * 24) / DAY_SECONDS) % 24;

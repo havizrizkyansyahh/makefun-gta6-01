@@ -185,6 +185,65 @@ export async function stageShot(name, world, { menu, hud }) {
     look();
     run(world, input, 4.6, look);
   }
+  else if (name === 'crowd') {
+    // a busy afternoon in Sunstone Plaza: shoppers, strollers and loiterers under the towers
+    world.newGame();
+    world.hour = 16.4;
+    const city = world.city;
+    const t = city.places.tower;
+    const p = world.player;
+    p.place(t.x + 4, t.z + 33, Math.PI);
+    p.give('pistol', 48);
+    p.select('pistol');
+    const rng = world.rng;
+    const loops = city.loops.filter((l) => Math.abs((l.x0 + l.x1) / 2 - t.x) < 100 && Math.abs((l.z0 + l.z1) / 2 - t.z) < 100);
+    for (let k = 0; k < 70; k += 1) {
+      if (k < 40) {
+        // strolling the plaza between the fountain and the palms
+        const a = rng.next() * Math.PI * 2;
+        const r = rng.range(9, 30);
+        const n = new Npc(world, 'civ', t.x + Math.cos(a) * r, t.z + Math.sin(a) * r, { state: 'idle', heading: rng.range(-Math.PI, Math.PI) });
+        n.timer = 1e9;
+        if (rng.chance(0.55)) {
+          // walking somewhere across the plaza
+          n.state = 'flee';
+          n.threat = { x: n.pos.x - Math.cos(n.heading) * 5, z: n.pos.z - Math.sin(n.heading) * 5 };
+          n.timer = 1e9;
+        }
+        world.npcs.push(n);
+      } else {
+        const loop = rng.pick(loops);
+        const n = new Npc(world, 'civ', loop.x0, loop.z0, { loop });
+        n.s = rng.range(0, 2 * (loop.x1 - loop.x0 + loop.z1 - loop.z0));
+        world.npcs.push(n);
+      }
+    }
+    // strollers, not runners
+    for (const n of world.npcs) if (n.state === 'flee') { n.walkSpeed = rng.range(1.1, 1.6); }
+    const walkers = world.npcs.filter((n) => n.state === 'flee');
+    world.rig.yaw = Math.PI + 0.25;
+    world.rig.pitch = 0.1;
+    run(world, input, 3, () => {
+      for (const n of walkers) { n.speed = Math.min(n.speed, n.walkSpeed); n.timer = 1e9; }
+      world.rig.yaw = Math.PI + 0.25; world.rig.pitch = 0.1;
+    });
+    world.hud.weapons.stripT = 2;
+  } else if (name === 'map') {
+    // the pause menu's city map, mid-story
+    world.newGame();
+    world.hour = 16.4;
+    for (const id of ['salt-air', 'rinse-cycle', 'broken-glass']) world.missions.completed.add(id);
+    world.money = 18450;
+    for (const k of [0, 3, 5, 8]) { world.missions.shellsFound.add(k); world.missions.shells[k].remove(); }
+    const p = world.player;
+    const c = world.city.places.gunshop;
+    p.place(c.x - 30, c.z + 12, -Math.PI / 2);
+    run(world, input, 1.5);
+    hud.show(false);
+    menu.hide();
+    menu.pause(world);
+    menu.map(world);
+  }
   // only the play itself in the frame: no leftover title cards or notices
   hud.el.notes.innerHTML = '';
   hud.bigT = 0;

@@ -470,7 +470,7 @@ export class City {
 
         if (kind === 'park' || kind === 'plaza') {
           if (kind === 'park') lawns.flat(lx0, lz0, lx1, lz1, CITY.curb + 0.02, col('#ffffff'), [4, 4]);
-          else lots.flat(lx0, lz0, lx1, lz1, CITY.curb + 0.015, col('#e9dcc6'), [3, 3]);
+          else walks.flat(lx0, lz0, lx1, lz1, CITY.curb + 0.015, col('#c9b9a0'), [3, 3]); // tiled plaza stone
           for (let k = 0; k < (kind === 'park' ? 14 : 8); k += 1) {
             const px = rng.range(lx0 + 4, lx1 - 4);
             const pz = rng.range(lz0 + 4, lz1 - 4);
@@ -794,6 +794,7 @@ export class City {
     const sc = new THREE.Vector3();
     const height = (x, z) => this.groundHeight(x, z);
 
+    this.treeSpots = trees;
     // palms and shade trees: textured leaf cards, bark and alpha-cut shadows (trees.js)
     for (const t of trees) this.addCollider(t.x - 0.25, t.x + 0.25, t.z - 0.25, t.z + 0.25, 3, 'tree');
     buildVegetation(
@@ -952,7 +953,8 @@ export class City {
 
   // ---------------------------------------------------------------- minimap picture
   buildMinimap() {
-    const S = 1024;
+    // a detailed paper-map style picture of the city, shared by the minimap and the full map
+    const S = 2048;
     const W = CITY.bounds * 2;
     const c = document.createElement('canvas');
     c.width = c.height = S;
@@ -960,33 +962,122 @@ export class City {
     const k = S / W;
     const X = (x) => (x + CITY.bounds) * k;
     const Z = (z) => (z + CITY.bounds) * k;
-    g.fillStyle = '#5d7a4a';
+    const rect = (x0, z0, x1, z1, color) => { g.fillStyle = color; g.fillRect(X(x0), Z(z0), (x1 - x0) * k, (z1 - z0) * k); };
+    const rng = makeRng(55);
+    // countryside
+    const land = g.createLinearGradient(0, 0, 0, S);
+    land.addColorStop(0, '#6f8f52');
+    land.addColorStop(1, '#88a65e');
+    g.fillStyle = land;
     g.fillRect(0, 0, S, S);
+    for (let i = 0; i < 900; i += 1) {
+      g.fillStyle = rng.chance(0.5) ? 'rgba(40,70,30,0.18)' : 'rgba(200,220,150,0.12)';
+      g.beginPath();
+      g.arc(rng.next() * S, rng.next() * Z(COAST_Z), rng.range(3, 12), 0, Math.PI * 2);
+      g.fill();
+    }
+    // beach and sea
     const ext = roadLine(N) + RH;
-    g.fillStyle = '#e8d29b';
+    const sand = g.createLinearGradient(0, Z(ext), 0, Z(COAST_Z));
+    sand.addColorStop(0, '#f1dfb0');
+    sand.addColorStop(1, '#d9c08a');
+    g.fillStyle = sand;
     g.fillRect(0, Z(ext), S, Z(COAST_Z) - Z(ext));
-    g.fillStyle = '#2a8fb8';
+    const sea = g.createLinearGradient(0, Z(COAST_Z), 0, S);
+    sea.addColorStop(0, '#5fd0d6');
+    sea.addColorStop(0.08, '#2aa3c4');
+    sea.addColorStop(1, '#0f5f8f');
+    g.fillStyle = sea;
     g.fillRect(0, Z(COAST_Z), S, S - Z(COAST_Z));
-    g.fillStyle = '#3b3f47';
-    g.fillRect(X(-ext), Z(-ext), (ext * 2) * k, (ext * 2) * k);
+    g.strokeStyle = 'rgba(255,255,255,0.35)';
+    g.lineWidth = 2;
+    for (let i = 0; i < 70; i += 1) {
+      const x = rng.next() * S;
+      const y = Z(COAST_Z) + 12 + rng.next() * (S - Z(COAST_Z) - 20);
+      g.beginPath();
+      g.moveTo(x, y);
+      g.quadraticCurveTo(x + 10, y - 5, x + 20, y);
+      g.stroke();
+    }
+    g.strokeStyle = 'rgba(255,255,255,0.8)';
+    g.lineWidth = 3;
+    g.beginPath();
+    g.moveTo(0, Z(COAST_Z) + 1);
+    g.lineTo(S, Z(COAST_Z) + 1);
+    g.stroke();
+    // roads, then the blocks on top
+    rect(-ext, -ext, ext, ext, '#30343c');
+    const LOTS = { palmline: '#eadcc0', corvel: '#cdd6e2', marisco: '#ecd3d8', harbor: '#c7d1d4', verde: '#d5e2c2', midtown: '#e2dcd0' };
     for (const loop of this.loops) {
       const kind = SPECIAL[`${loop.bx},${loop.bz}`];
-      g.fillStyle = '#9a9590';
-      g.fillRect(X(blockMin(loop.bx)), Z(blockMin(loop.bz)), (blockMax(loop.bx) - blockMin(loop.bx)) * k, (blockMax(loop.bz) - blockMin(loop.bz)) * k);
+      const x0 = blockMin(loop.bx); const x1 = blockMax(loop.bx);
+      const z0 = blockMin(loop.bz); const z1 = blockMax(loop.bz);
+      rect(x0, z0, x1, z1, '#bdb6ab');
+      const w = CITY.walk;
+      const lot = kind === 'park' ? '#79b356' : kind === 'parking' ? '#5a5e66' : kind === 'plaza' ? '#efe3cc' : LOTS[districtOf(loop.bx, loop.bz)];
+      rect(x0 + w, z0 + w, x1 - w, z1 - w, lot);
       if (kind === 'park') {
-        g.fillStyle = '#6fae4e';
-        g.fillRect(X(blockMin(loop.bx) + CITY.walk), Z(blockMin(loop.bz) + CITY.walk), (blockMax(loop.bx) - blockMin(loop.bx) - CITY.walk * 2) * k, (blockMax(loop.bz) - blockMin(loop.bz) - CITY.walk * 2) * k);
+        g.strokeStyle = '#e8dcc0';
+        g.lineWidth = 4;
+        g.beginPath();
+        g.moveTo(X(x0 + w), Z(z0 + w)); g.lineTo(X(x1 - w), Z(z1 - w));
+        g.moveTo(X(x1 - w), Z(z0 + w)); g.lineTo(X(x0 + w), Z(z1 - w));
+        g.stroke();
+      }
+      if (kind === 'parking') {
+        g.strokeStyle = 'rgba(255,255,255,0.6)';
+        g.lineWidth = 1;
+        for (let x = x0 + w + 3; x < x1 - w; x += 7) { g.beginPath(); g.moveTo(X(x), Z(z0 + w + 2)); g.lineTo(X(x), Z(z1 - w - 2)); g.stroke(); }
       }
     }
-    for (const b of this.colliders) {
-      if (b.tag !== 'building' && b.tag !== 'container' && b.tag !== 'fountain') continue;
-      g.fillStyle = b.tag === 'fountain' ? '#4fc3d9' : b.y1 > 40 ? '#c9ced6' : '#b6b0a6';
-      g.fillRect(X(b.x0), Z(b.z0), (b.x1 - b.x0) * k, (b.z1 - b.z0) * k);
+    // lane markings and zebra crossings
+    g.strokeStyle = 'rgba(242,198,65,0.8)';
+    g.lineWidth = 1.5;
+    g.setLineDash([8, 8]);
+    for (let i = 0; i <= N; i += 1) {
+      g.beginPath(); g.moveTo(X(roadLine(i)), Z(-ext)); g.lineTo(X(roadLine(i)), Z(ext)); g.stroke();
+      g.beginPath(); g.moveTo(X(-ext), Z(roadLine(i))); g.lineTo(X(ext), Z(roadLine(i))); g.stroke();
     }
-    g.fillStyle = '#a77b52';
-    g.fillRect(X(PIER.x - PIER.half), Z(PIER.z0), PIER.half * 2 * k, (PIER.z1 - PIER.z0) * k);
+    g.setLineDash([]);
+    // buildings with a soft drop shadow; towers lighter, tinted by district
+    const ROOF = { palmline: '#f2b48c', corvel: '#9fb4cc', marisco: '#e59aa8', harbor: '#8fa3ad', verde: '#d9c69a', midtown: '#cdb79a' };
+    const blocks = this.colliders.filter((b) => b.tag === 'building' || b.tag === 'container' || b.tag === 'fountain' || b.tag === 'hut');
+    g.fillStyle = 'rgba(0,0,0,0.28)';
+    for (const b of blocks) g.fillRect(X(b.x0) + 3, Z(b.z0) + 4, (b.x1 - b.x0) * k, (b.z1 - b.z0) * k);
+    for (const b of blocks) {
+      const d = this.districtAt((b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2);
+      let color = ROOF[d];
+      if (b.tag === 'fountain') color = '#58c6dc';
+      else if (b.tag === 'container') color = rng.pick(['#c4452f', '#2f6fb0', '#e0a127', '#3d8f5f']);
+      else if (b.y1 > 40) color = '#dfe7f0';
+      g.fillStyle = color;
+      g.fillRect(X(b.x0), Z(b.z0), (b.x1 - b.x0) * k, (b.z1 - b.z0) * k);
+      g.strokeStyle = 'rgba(255,255,255,0.35)';
+      g.lineWidth = 1;
+      g.strokeRect(X(b.x0) + 0.5, Z(b.z0) + 0.5, (b.x1 - b.x0) * k - 1, (b.z1 - b.z0) * k - 1);
+    }
+    // trees and palms
+    for (const t of this.treeSpots || []) {
+      g.fillStyle = '#3f7f36';
+      g.beginPath(); g.arc(X(t.x), Z(t.z), 4.5 * t.s, 0, Math.PI * 2); g.fill();
+      g.fillStyle = 'rgba(160,210,120,0.6)';
+      g.beginPath(); g.arc(X(t.x) - 1.2, Z(t.z) - 1.2, 2, 0, Math.PI * 2); g.fill();
+    }
+    for (const p of this.palms) {
+      g.strokeStyle = '#2f6a2c';
+      g.lineWidth = 1.5;
+      for (let a = 0; a < 6; a += 1) {
+        const ang = (a / 6) * Math.PI * 2;
+        g.beginPath(); g.moveTo(X(p.x), Z(p.z)); g.lineTo(X(p.x) + Math.cos(ang) * 5, Z(p.z) + Math.sin(ang) * 5); g.stroke();
+      }
+    }
+    // the pier
+    rect(PIER.x - PIER.half, PIER.z0, PIER.x + PIER.half, PIER.z1, '#a77b52');
+    g.strokeStyle = 'rgba(60,40,20,0.5)';
+    for (let z = PIER.z0; z < PIER.z1; z += 3) { g.beginPath(); g.moveTo(X(PIER.x - PIER.half), Z(z)); g.lineTo(X(PIER.x + PIER.half), Z(z)); g.stroke(); }
     this.minimap = { canvas: c, scale: k, size: S };
   }
+
 
   /** Night factor 0..1 lights up windows and lamps; time animates the sea. */
   /** A floating wooden barge out at sea that people can stand on (missions use it). */

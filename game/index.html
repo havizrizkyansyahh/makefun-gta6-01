@@ -30,10 +30,36 @@
   .hud-stars .star.on { color: #fff; }
   .hud-stars .star.blink { color: #ffd23f; }
   .hud-money { font: 800 40px var(--display); color: #8dff9e; letter-spacing: 1px; -webkit-text-stroke: 1px #0a3d1a; }
-  .hud-weapon { margin-top: 6px; display: inline-block; padding: 6px 12px; background: rgba(10,14,30,.55); border-left: 4px solid var(--sun); border-radius: 4px; transition: transform .15s; }
-  .hud-weapon.flash { transform: scale(1.12); }
-  .w-name { font: 700 18px var(--display); letter-spacing: 1px; }
-  .w-ammo { font: 600 16px var(--font); color: #ffd27a; }
+  .wpn { margin-top: 8px; margin-left: auto; display: flex; align-items: center; gap: 12px; width: 300px; padding: 8px 14px 10px 10px; background: linear-gradient(270deg, rgba(10,14,30,.82), rgba(10,14,30,.45)); border-right: 4px solid var(--sun); border-radius: 8px; box-sizing: border-box; }
+  .wpn.pop { animation: wpnpop .28s ease-out; }
+  @keyframes wpnpop { 0% { transform: scale(1.12); } 100% { transform: scale(1); } }
+  .wpn-icon { width: 118px; height: 53px; object-fit: contain; filter: drop-shadow(0 2px 3px rgba(0,0,0,.8)); }
+  .wpn-info { flex: 1; text-align: right; }
+  .wpn-name { font: 800 16px var(--display); letter-spacing: 2px; text-transform: uppercase; color: #ffd27a; }
+  .wpn-ammo { line-height: 1; margin-top: 2px; }
+  .wpn-clip { font: 900 34px var(--display); }
+  .wpn-reserve { font: 700 15px var(--font); opacity: .8; margin-left: 4px; }
+  .wpn.low .wpn-clip { color: #ff5252; }
+  .wpn-bar { height: 5px; margin-top: 5px; background: rgba(255,255,255,.15); border-radius: 3px; overflow: hidden; }
+  .wpn-bar i { display: block; height: 100%; background: linear-gradient(90deg, #ffb347, #ffe66d); transition: width .1s; }
+  .wpn-strip { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; opacity: 0; transition: opacity .3s; }
+  .wpn-strip.on { opacity: 1; }
+  .wpn-slot { position: relative; width: 66px; height: 38px; display: grid; place-items: center; background: rgba(10,14,30,.6); border-radius: 6px; border: 2px solid transparent; opacity: .3; }
+  .wpn-slot.owned { opacity: .85; }
+  .wpn-slot.current { border-color: var(--sun); opacity: 1; background: rgba(255,179,71,.25); }
+  .wpn-slot img { width: 54px; height: 24px; object-fit: contain; }
+  .wpn-slot kbd { position: absolute; left: -4px; top: -6px; min-width: 12px; padding: 0 4px; font-size: 10px; }
+  .wpn-wheel { position: absolute; left: 50%; top: 50%; width: 460px; height: 460px; margin: -230px 0 0 -230px; opacity: 0; transform: scale(.85); transition: opacity .15s, transform .15s; pointer-events: none; }
+  .wpn-wheel.on { opacity: 1; transform: scale(1); }
+  .wheel-ring { position: absolute; inset: 0; border-radius: 50%; background: radial-gradient(circle, rgba(10,14,30,.25) 0 26%, rgba(10,14,30,.78) 27% 70%, rgba(10,14,30,0) 71%); border: 2px solid rgba(255,255,255,.12); }
+  .wheel-item { position: absolute; width: 150px; margin: -48px 0 0 -75px; text-align: center; opacity: .25; transition: transform .12s, opacity .12s; }
+  .wheel-item.owned { opacity: .7; }
+  .wheel-item.sel { opacity: 1; transform: scale(1.15); }
+  .wheel-item.sel img { filter: drop-shadow(0 0 10px #ffb347); }
+  .wheel-item img { width: 120px; height: 54px; object-fit: contain; }
+  .wheel-name { font: 800 14px var(--display); letter-spacing: 2px; text-transform: uppercase; }
+  .wheel-ammo { font: 600 13px var(--font); color: #ffd27a; }
+  .wheel-centre { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font: 900 18px var(--display); letter-spacing: 2px; text-transform: uppercase; color: #ffb347; text-align: center; width: 120px; }
   .hud-bl { position: absolute; left: 26px; bottom: 24px; width: 236px; }
   .hud-map { width: 236px; height: 236px; border-radius: 50%; overflow: hidden; border: 4px solid rgba(15,18,35,.85); box-shadow: 0 6px 18px rgba(0,0,0,.5), inset 0 0 0 2px rgba(255,255,255,.15); background: #2a8fb8; }
   .hud-bars { display: flex; gap: 6px; margin-top: 8px; }
@@ -104,7 +130,19 @@
   .settings label { display: flex; justify-content: space-between; gap: 30px; align-items: center; }
   .settings input[type=range] { width: 220px; accent-color: var(--sun); }
   .credits { max-width: 560px; font-size: 16px; line-height: 1.55; margin-bottom: 14px; }
-  .bigmap { width: min(70vh, 760px); height: min(70vh, 760px); border-radius: 10px; border: 4px solid rgba(255,255,255,.2); display: block; }
+  .bigmap { width: min(86vh, 760px); height: min(86vh, 760px); border-radius: 12px; border: 4px solid rgba(255,255,255,.22); display: block; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+  .menu.map .panel { max-width: none; }
+  .menu.map .items { margin-top: 10px; }
+  .mapwrap { display: flex; gap: 28px; align-items: flex-start; }
+  .mapside { width: 300px; }
+  .mapside h2 { margin: 0 0 4px; font-size: 40px; }
+  .mapsub { margin: 0 0 16px; font-size: 14px; opacity: .75; }
+  .mapobj { padding: 10px 12px; margin-bottom: 16px; background: rgba(255,95,162,.15); border-left: 4px solid var(--pink); border-radius: 4px; font-size: 15px; }
+  .mapobj b { display: block; font: 800 13px var(--display); letter-spacing: 2px; color: var(--pink); text-transform: uppercase; }
+  .maplegend { display: grid; gap: 7px; font-size: 15px; margin-bottom: 16px; }
+  .maplegend i { display: inline-grid; place-items: center; width: 20px; height: 20px; margin-right: 10px; border-radius: 50%; color: #111; font: 800 11px sans-serif; font-style: normal; vertical-align: -4px; box-shadow: 0 0 0 2px rgba(10,14,30,.8); }
+  .mapstats { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 14px; opacity: .9; }
+  .mapstats b { color: #ffd27a; }
   .legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 10px 0 12px; font-size: 14px; }
   .legend span::before { content: ""; display: inline-block; width: 11px; height: 11px; border-radius: 50%; background: var(--c); margin-right: 6px; vertical-align: -1px; }
   .menu-toast { position: fixed; left: 50%; bottom: 60px; transform: translateX(-50%); padding: 10px 20px; border-radius: 20px; background: #1d2a38; font-weight: 700; }

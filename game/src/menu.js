@@ -27,6 +27,7 @@ const CONTROLS = [
   ['Left mouse', 'Shoot / punch'],
   ['Right mouse', 'Aim down the sights'],
   ['Q / wheel / 1-4', 'Switch weapon'],
+  ['Tab (hold)', 'Weapon wheel, time slows'],
   ['R', 'Reload / next radio station'],
   ['E', 'Interact (save, shops, jobs)'],
   ['H', 'Horn'],
@@ -173,14 +174,28 @@ export class Menu {
   }
 
   map(world) {
+    const obj = world.missions.objective();
+    const legend = [
+      ['#ffb000', 'N', 'Nadia (story)'], ['#ff5fa2', 'P', 'Pearl (story)'], ['#52d273', 'H', "Kai's apartment: save"],
+      ['#ff7043', 'G', 'Coastline Arms: guns'], ['#4fc3f7', 'C', 'Bayline Couriers'], ['#ff9f1c', 'R', 'Bayside Run: street race'],
+      ['#ffd23f', '', 'Objective'], ['#ff3b3b', '', 'Police'], ['#ff96be', '', 'Sun Shell'],
+    ];
+    const done = world.missions.completed.size;
     this.push({
       kind: 'map',
-      title: 'SOLMARA BAY',
-      body: '<canvas class="bigmap" width="760" height="760"></canvas><div class="legend"><span style="--c:#ffb000">N Nadia</span><span style="--c:#ff5fa2">P Pearl</span><span style="--c:#52d273">H Save</span><span style="--c:#ff7043">G Guns</span><span style="--c:#4fc3f7">C Courier</span><span style="--c:#ff9f1c">R Race</span><span style="--c:#ffd23f">Objective</span></div>',
+      body: `<div class="mapwrap"><canvas class="bigmap" width="1000" height="1000"></canvas>
+        <div class="mapside">
+          <h2>SOLMARA BAY</h2>
+          <p class="mapsub">Six districts on a sunny bay: towers, beach, harbour and hills.</p>
+          ${obj ? `<div class="mapobj"><b>${obj.title}</b><span>${obj.text}</span></div>` : ''}
+          <div class="maplegend">${legend.map(([c, l, t]) => `<div><i style="background:${c}">${l}</i>${t}</div>`).join('')}</div>
+          <div class="mapstats"><span>Story <b>${done}/${MISSIONS.length}</b></span><span>Sun Shells <b>${world.missions.shellsFound.size}/12</b></span><span>Cash <b>$${Math.floor(world.money).toLocaleString('en-US')}</b></span></div>
+        </div></div>`,
       items: [{ label: 'Back', action: () => this.back() }],
       after: (root) => world.hud.drawBigMap(root.querySelector('.bigmap')),
     });
   }
+
 
   stats(world) {
     const s = world.stats;
