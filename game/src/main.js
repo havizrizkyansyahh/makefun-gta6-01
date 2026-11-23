@@ -8,18 +8,17 @@ import { Sound } from './audio.js';
 import { Hud } from './hud.js';
 import { Menu } from './menu.js';
 import { CAMERA } from './config.js';
+import { PostFX } from './postfx.js';
 
 const canvas = document.getElementById('game');
 const params = new URLSearchParams(location.search);
 const shot = params.get('shot');
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: !!shot });
-renderer.setPixelRatio(Math.min(devicePixelRatio, shot ? 1 : 1.75));
+renderer.setPixelRatio(Math.min(devicePixelRatio, shot ? 1 : 1.5));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const audio = new Sound();
@@ -27,6 +26,9 @@ const hud = new Hud(document.getElementById('hud'));
 const menu = new Menu(document.getElementById('menu'), audio);
 const input = new Input(canvas);
 const world = new World(renderer, audio, hud, Number(params.get('seed')) || 7);
+const pixelRatio = renderer.getPixelRatio();
+world.post = new PostFX(renderer);
+world.post.setSize(innerWidth, innerHeight, pixelRatio);
 window.solmara = world; // handy from the devtools console
 
 let state = 'title';
@@ -112,6 +114,7 @@ function titleCamera(dt) {
 
 addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
+  world.post.setSize(innerWidth, innerHeight, renderer.getPixelRatio());
   world.camera.aspect = innerWidth / innerHeight;
   world.camera.updateProjectionMatrix();
 });

@@ -227,6 +227,7 @@ export class World {
 
     for (const n of this.npcs) n.update(dt);
     this.separatePeople();
+    this.cullFar();
     this.police.update(dt);
     this.traffic.update(dt);
     this.missions.update(dt, input);
@@ -351,6 +352,15 @@ export class World {
     const d = Math.hypot(p.pos.x - v.pos.x, p.pos.z - v.pos.z);
     if (d < 7) this.hurtPlayer(110 * (1 - d / 7), v);
     if (v.mission === true || v.kind === 'police') this.police.report('shots', v.pos.x, v.pos.z, false);
+  }
+
+  /** Skip drawing cars and people the fog would hide anyway. */
+  cullFar() {
+    const c = this.camera.position;
+    for (const v of this.vehicles) v.mesh.visible = Math.abs(v.pos.x - c.x) + Math.abs(v.pos.z - c.z) < 420;
+    for (const n of this.npcs) {
+      if (!n.inVehicle) n.human.root.visible = Math.abs(n.pos.x - c.x) + Math.abs(n.pos.z - c.z) < 200;
+    }
   }
 
   separatePeople() {
@@ -503,7 +513,9 @@ export class World {
   }
 
   render() {
-    this.renderer.render(this.scene, this.camera);
+    this.sky.updateEnvironment(this.renderer);
+    if (this.post) this.post.render(this.scene, this.camera, this.time);
+    else this.renderer.render(this.scene, this.camera);
   }
 }
 

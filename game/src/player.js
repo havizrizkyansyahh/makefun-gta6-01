@@ -69,7 +69,12 @@ export class Player {
     const fresh = !w.owned;
     w.owned = true;
     w.ammo += ammo;
-    if (w.clip === 0) this.reload(true);
+    if (w.clip === 0) {
+      // load the new magazine of the weapon just given, not of the one in hand
+      const take = Math.min(WEAPONS[key].mag, w.ammo);
+      w.clip += take;
+      w.ammo -= take;
+    }
     if (fresh) this.select(key);
   }
 

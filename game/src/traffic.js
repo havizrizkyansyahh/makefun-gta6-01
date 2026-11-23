@@ -46,6 +46,13 @@ export class LaneDriver {
     const w = this.world;
     const city = w.city;
     if (v.dead) { v.input.throttle = 0; return; }
+    if (this.mode === 'parked') {
+      // crew got out: stop and wait with the lights on
+      v.input.throttle = v.forward > 0.3 ? -1 : v.forward < -0.3 ? 1 : 0;
+      v.input.steer = 0;
+      v.input.handbrake = Math.abs(v.forward) < 2;
+      return;
+    }
     const A = city.nodes[this.a];
     const B = city.nodes[this.b];
     let dx = B.x - A.x;
@@ -98,7 +105,7 @@ export class LaneDriver {
     const diff = wrapAngle(desired - v.heading);
     let steer = clamp(diff * 2.4, -1, 1);
 
-    let want = this.mode === 'traffic' ? this.cruise : this.mode === 'chase' ? 34 : 30;
+    let want = this.mode === 'traffic' ? this.cruise : this.mode === 'chase' ? 27 : 26;
     if (this.panic > 0) { this.panic -= dt; want = Math.max(want, 21); }
     if (turn && proj > len - 26) want = Math.min(want, this.mode === 'traffic' ? 7.5 : 14);
     if (Math.abs(diff) > 0.6) want = Math.min(want, 8);

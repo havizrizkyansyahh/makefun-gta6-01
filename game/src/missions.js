@@ -150,16 +150,19 @@ export class Missions {
         return v;
       },
       spawnFleeing(model, dist) {
+        // try road segments around the wanted distance, nearest to it first, until one is free
         const c = w.player.where();
-        let best = null;
-        for (const n of w.city.nodes) {
-          const d = Math.hypot(n.x - c.x, n.z - c.z);
-          if (d > dist - 30 && d < dist + 40 && (!best || Math.abs(d - dist) < Math.abs(best.d - dist))) best = { n, d };
+        const nodes = w.city.nodes
+          .map((n, i) => ({ i, n, off: Math.abs(Math.hypot(n.x - c.x, n.z - c.z) - dist) }))
+          .sort((p, q) => p.off - q.off);
+        let v = null;
+        for (const { i, n } of nodes) {
+          for (const b of n.links) {
+            v = w.traffic.spawnCar({ a: i, b, t: 0.4 }, model, 'flee');
+            if (v) break;
+          }
+          if (v) break;
         }
-        const a = w.city.nodes.indexOf(best.n);
-        const b = w.rng.pick(best.n.links);
-        const seg = { a, b, t: 0.3 };
-        const v = w.traffic.spawnCar(seg, model, 'flee') || w.traffic.spawnCar({ a: b, b: a, t: 0.5 }, model, 'flee');
         v.mission = true;
         v.kind = 'mission';
         v.ai.cruise = 22;
@@ -275,6 +278,7 @@ export class Missions {
     if (this.contactMarker) this.contactMarker.remove();
     this.contactMarker = null;
     this.contactKey = null;
+    this.armed = true;
   }
 
   // ------------------------------------------------------------ side activities
@@ -376,11 +380,16 @@ export class Missions {
         const pl = w.city.places[next.giver];
         this.contactMarker = new Marker(w.scene, pl.x, pl.z, pl.color, 2.2, w.city.groundHeight(pl.x, pl.z));
         this.contactKey = next.giver;
+        // standing in it already (the last mission ended here): step out and back in to start
+        this.armed = !this.contactMarker.inside(at.x, at.z, 2);
       }
       if (this.contactMarker) {
         this.contactMarker.update(dt);
         const slow = !p.vehicle || p.vehicle.speed < 3;
-        if (slow && this.contactMarker.inside(at.x, at.z, 0.5) && !this.side && w.police.stars === 0) this.start(next);
+        const inside = this.contactMarker.inside(at.x, at.z, 0.5);
+        if (!inside && !this.contactMarker.inside(at.x, at.z, 2)) this.armed = true;
+        if (!this.armed && inside) w.hud.help('Step out of the marker and back in to start the next mission.');
+        else if (slow && inside && !this.side && w.police.stars === 0) this.start(next);
         else if (slow && this.contactMarker.inside(at.x, at.z, 0.5) && w.police.stars > 0) w.hud.help('Lose the cops before starting a mission.');
       }
     }

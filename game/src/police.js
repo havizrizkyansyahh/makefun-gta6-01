@@ -96,6 +96,7 @@ export class Police {
       v.kind = 'police';
       v.siren = true;
       v.crew = 2;
+      v.armor = 0.65; // push bars and reinforced panels: pursuits should not end in self-wrecks
       return v;
     }
     return null;

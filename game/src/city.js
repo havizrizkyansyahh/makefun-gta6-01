@@ -7,7 +7,7 @@ import { CITY } from './config.js';
 import { MeshBuilder, col } from './geometry.js';
 import { makeRng, clamp } from './rng.js';
 import {
-  facadeTextures, sidewalkTexture, asphaltTexture, grassTexture, sandTexture,
+  facadeTextures, sidewalkTexture, asphaltTexture, grassTexture, sandTexture, sidewalkNormal, asphaltNormal,
 } from './textures.js';
 
 const N = CITY.blocks;
@@ -276,9 +276,11 @@ export class City {
     const extent = roadLine(N) + RH;
     const asphalt = asphaltTexture();
     asphalt.repeat.set(extent / 8, extent / 8);
+    const asphaltN = asphaltNormal();
+    asphaltN.repeat.copy(asphalt.repeat);
     const road = new THREE.Mesh(
       new THREE.PlaneGeometry(extent * 2, extent * 2),
-      new THREE.MeshStandardMaterial({ map: asphalt, roughness: 0.92, metalness: 0 }),
+      new THREE.MeshStandardMaterial({ map: asphalt, normalMap: asphaltN, normalScale: new THREE.Vector2(0.6, 0.6), color: '#d8d2ca', roughness: 0.86, metalness: 0, envMapIntensity: 0.22 }),
     );
     road.rotation.x = -Math.PI / 2;
     road.receiveShadow = true;
@@ -286,12 +288,15 @@ export class City {
 
     const grass = grassTexture();
     grass.repeat.set(160, 160);
+    // countryside around the city, stopping at the shore so it never covers the sea
+    const north = -1300;
+    const south = COAST_Z - 12;
     const outer = new THREE.Mesh(
-      new THREE.PlaneGeometry(2600, 2600),
-      new THREE.MeshStandardMaterial({ map: grass, color: '#c9d8a0', roughness: 1 }),
+      new THREE.PlaneGeometry(2600, south - north),
+      new THREE.MeshStandardMaterial({ map: grass, color: '#c9d8a0', roughness: 1, envMapIntensity: 0.3 }),
     );
     outer.rotation.x = -Math.PI / 2;
-    outer.position.y = -0.03;
+    outer.position.set(0, -0.03, (north + south) / 2);
     outer.receiveShadow = true;
     this.group.add(outer);
 
@@ -328,7 +333,7 @@ export class City {
 
   buildBlocks() {
     const rng = this.rng;
-    const kinds = ['glass', 'stucco', 'shed'];
+    const kinds = ['glass', 'stucco', 'shed', 'shop'];
     const walls = {};
     for (let k = 0; k < kinds.length; k += 1) walls[kinds[k]] = new MeshBuilder();
     const roofs = new MeshBuilder();
@@ -336,25 +341,92 @@ export class City {
     const lawns = new MeshBuilder();
     const lots = new MeshBuilder();
     const shade = { px: 0.94, nx: 0.86, pz: 1, nz: 0.9, py: 1 };
+    const SIDES = ['px', 'nx', 'pz', 'nz'];
+    const light = (c) => c.clone().lerp(col('#ffffff'), 0.55);
+    const AWNINGS = ['#c0392b', '#1e6f8a', '#2d6a4f', '#f2a541', '#8a4fbf', '#e76f51'];
 
-    const building = (x0, z0, x1, z1, h, kind, tint, crown) => {
+    /** Rooftop clutter: water tanks on legs, AC units, stair huts and masts. */
+    const rooftop = (x0, z0, x1, z1, h, tall) => {
+      const n = rng.int(1, 3);
+      for (let k = 0; k < n; k += 1) {
+        const ux = x0 + (x1 - x0) * rng.range(0.2, 0.75);
+        const uz = z0 + (z1 - z0) * rng.range(0.2, 0.75);
+        const pick = rng.next();
+        if (pick < 0.35 && !tall) {
+          for (const [ox, oz] of [[-0.9, -0.9], [0.9, -0.9], [-0.9, 0.9], [0.9, 0.9]]) roofs.box(ux + ox - 0.08, h, uz + oz - 0.08, ux + ox + 0.08, h + 1.6, uz + oz + 0.08, col('#5a5450'));
+          roofs.cylinder(ux, uz, 1.3, h + 1.6, h + 4.2, col('#8a6a4a'), { segments: 14, capColor: col('#6e5640') });
+        } else if (pick < 0.75) {
+          roofs.box(ux, h, uz, ux + 2.6, h + 1.4, uz + 1.8, col('#c3c7cc'), { shade });
+          roofs.box(ux + 0.3, h + 1.4, uz + 0.3, ux + 1.3, h + 1.5, uz + 1.3, col('#55595f'), { faces: ['py'] });
+        } else {
+          roofs.box(ux, h, uz, ux + 3.2, h + 2.8, uz + 3.2, col('#d8d2c6'), { shade });
+        }
+      }
+      if (tall) roofs.box((x0 + x1) / 2 - 0.15, h, (z0 + z1) / 2 - 0.15, (x0 + x1) / 2 + 0.15, h + rng.range(8, 18), (z0 + z1) / 2 + 0.15, col('#9aa2ab'));
+    };
+
+    /**
+     * One building: walls in a facade material, optional street-level shops with awnings,
+     * floor ledges, balconies, a cornice, a roof with clutter, and its collision box.
+     * opts: { shops, balconies, round, crown }
+     */
+    const building = (x0, z0, x1, z1, h, kind, tint, opts = {}) => {
       const c = col(tint);
-      walls[kind].box(x0, 0, z0, x1, h, z1, c, { faces: ['px', 'nx', 'pz', 'nz'], tile: [16, 14], uOffset: rng.int(0, 3) * 0.25, shade });
-      // parapet roof, a shade darker than the walls
-      const r = col(tint).multiplyScalar(0.72);
-      roofs.box(x0, h - 0.01, z0, x1, h + 0.01, z1, r, { faces: ['py'] });
-      roofs.box(x0, h, z0, x1, h + 0.7, z0 + 0.4, c, { faces: ['py', 'pz', 'nz', 'px', 'nx'] });
-      roofs.box(x0, h, z1 - 0.4, x1, h + 0.7, z1, c, { faces: ['py', 'pz', 'nz', 'px', 'nx'] });
-      if (crown && h > 30) {
-        const inset = Math.min(x1 - x0, z1 - z0) * 0.28;
-        roofs.box(x0 + inset, h, z0 + inset, x1 - inset, h + 4 + rng.next() * 6, z1 - inset, col('#8a95a3'), { shade });
+      if (opts.round) {
+        const cx = (x0 + x1) / 2;
+        const cz = (z0 + z1) / 2;
+        const r = Math.min(x1 - x0, z1 - z0) / 2;
+        walls[kind].cylinder(cx, cz, r, 0, h, c, { tile: [16, 14], segments: 40, cap: false });
+        for (let y = 14; y < h - 4; y += 14) roofs.cylinder(cx, cz, r + 0.25, y - 0.3, y + 0.1, light(c), { segments: 40, cap: false });
+        roofs.cylinder(cx, cz, r + 0.4, h - 0.6, h + 0.3, light(c), { segments: 40, capColor: c.clone().multiplyScalar(0.7) });
+        roofs.cylinder(cx, cz, r * 0.55, h + 0.3, h + 6, col('#c8d0d8'), { segments: 28 });
+        rooftop(cx - r * 0.4, cz - r * 0.4, cx + r * 0.4, cz + r * 0.4, h + 6, true);
+        this.addCollider(cx - r * 0.93, cx + r * 0.93, cz - r * 0.93, cz + r * 0.93, h, 'building');
+        return;
       }
-      if (h > 8 && rng.chance(0.5)) {
-        // rooftop unit
-        const ux = x0 + (x1 - x0) * rng.range(0.2, 0.6);
-        const uz = z0 + (z1 - z0) * rng.range(0.2, 0.6);
-        roofs.box(ux, h, uz, ux + 3, h + 2, uz + 2.4, col('#b8bcc2'), { shade });
+      const street = opts.shops && h > 6;
+      const y0 = street ? 4.4 : 0;
+      walls[kind].box(x0, y0, z0, x1, h, z1, c, { faces: SIDES, tile: [16, 14], uOffset: opts.balconies ? 0 : rng.int(0, 3) * 0.25, shade });
+      if (street) {
+        walls.shop.box(x0, 0, z0, x1, 4.4, z1, col('#ffffff'), { faces: SIDES, tile: [8, 4.5], uOffset: rng.int(0, 1) * 0.5, shade });
+        roofs.box(x0 - 0.3, 4.25, z0 - 0.3, x1 + 0.3, 4.65, z1 + 0.3, light(c), { shade });
+        // striped awnings over some shopfronts on the long sides
+        for (const side of [1, -1]) {
+          if (!rng.chance(0.65)) continue;
+          const z = side > 0 ? z1 : z0;
+          const aw = col(rng.pick(AWNINGS));
+          for (let u = x0 + 1; u + 6 < x1; u += 8) {
+            roofs.box(u, 3.35, side > 0 ? z : z - 1.7, u + 6, 3.55, side > 0 ? z + 1.7 : z, aw, { shade });
+            roofs.box(u, 3.0, side > 0 ? z + 1.62 : z - 1.7, u + 6, 3.55, side > 0 ? z + 1.7 : z - 1.62, aw.clone().multiplyScalar(0.85));
+          }
+        }
       }
+      if (kind === 'stucco' && h > 11) {
+        for (let y = 7; y < h - 2; y += 7) roofs.box(x0 - 0.14, y - 0.14, z0 - 0.14, x1 + 0.14, y + 0.08, z1 + 0.14, light(c), { shade });
+      }
+      if (opts.balconies && h > 10) {
+        const rail = col('#f4f4f2');
+        const slab = light(c);
+        for (let y = 7; y < h - 3; y += 3.5) {
+          for (let u = 2; u < x1 - x0 - 1; u += 8) {
+            for (const side of [1, -1]) {
+              const bx = side > 0 ? x0 + u : x1 - u;
+              const z = side > 0 ? z1 : z0;
+              const zo = side > 0 ? z + 1.1 : z - 1.1;
+              roofs.box(bx - 0.9, y - 0.08, Math.min(z, zo), bx + 0.9, y + 0.08, Math.max(z, zo), slab, { shade });
+              roofs.box(bx - 0.9, y + 0.08, side > 0 ? zo - 0.05 : zo, bx + 0.9, y + 1.0, side > 0 ? zo : zo + 0.05, rail, { shade });
+            }
+          }
+        }
+      }
+      // cornice and roof
+      roofs.box(x0 - 0.35, h - 0.55, z0 - 0.35, x1 + 0.35, h + 0.2, z1 + 0.35, light(c), { shade });
+      roofs.box(x0, h + 0.19, z0, x1, h + 0.2, z1, c.clone().multiplyScalar(0.62), { faces: ['py'] });
+      if (opts.crown && h > 30) {
+        const inset = Math.min(x1 - x0, z1 - z0) * 0.22;
+        roofs.box(x0 + inset, h + 0.2, z0 + inset, x1 - inset, h + 5 + rng.next() * 5, z1 - inset, col('#aab4bf'), { shade });
+        rooftop(x0 + inset, z0 + inset, x1 - inset, z1 - inset, h + 5, true);
+      } else if (h > 8) rooftop(x0, z0, x1, z1, h + 0.2, false);
       this.addCollider(x0, x1, z0, z1, h, 'building');
     };
 
@@ -411,7 +483,7 @@ export class City {
 
         const tint = () => rng.pick(PASTELS);
         if (kind === 'landmark') {
-          building(lx0 + 2, lz0 + 2, lx1 - 2, lz1 - 2, rng.range(16, 22), 'stucco', bz === 1 ? '#f6f6f2' : '#dfe8f2', false);
+          building(lx0 + 2, lz0 + 2, lx1 - 2, lz1 - 2, rng.range(16, 22), 'stucco', bz === 1 ? '#f6f6f2' : '#dfe8f2', { shops: true });
         } else if (dist === 'corvel') {
           const g = 8;
           const mx = (lx0 + lx1) / 2;
@@ -419,13 +491,19 @@ export class City {
           const quads = [[lx0, lz0, mx - g / 2, mz - g / 2], [mx + g / 2, lz0, lx1, mz - g / 2], [lx0, mz + g / 2, mx - g / 2, lz1], [mx + g / 2, mz + g / 2, lx1, lz1]];
           for (const [a, b, c, d] of quads) {
             const h = rng.range(42, 128) * (bx === 4 && bz === 3 ? 1.25 : 1);
-            const podium = rng.range(6, 9);
-            building(a, b, c, d, podium, 'stucco', rng.pick(TOWER_TINTS), false);
-            building(a + 2.5, b + 2.5, c - 2.5, d - 2.5, h, 'glass', rng.pick(TOWER_TINTS), true);
+            const podium = rng.range(6.5, 9);
+            building(a, b, c, d, podium, 'stucco', rng.pick(TOWER_TINTS), { shops: true });
+            const style = rng.next();
+            if (style < 0.28) building(a + 3, b + 3, c - 3, d - 3, h, 'glass', rng.pick(TOWER_TINTS), { round: true });
+            else if (style < 0.6) {
+              // stepped tower: a wide shaft with a slimmer one rising out of it
+              building(a + 2.5, b + 2.5, c - 2.5, d - 2.5, h * 0.62, 'glass', rng.pick(TOWER_TINTS), {});
+              building(a + 6.5, b + 6.5, c - 6.5, d - 6.5, h, 'glass', rng.pick(TOWER_TINTS), { crown: true });
+            } else building(a + 2.5, b + 2.5, c - 2.5, d - 2.5, h, 'glass', rng.pick(TOWER_TINTS), { crown: true });
           }
         } else if (dist === 'harbor') {
           const mz = (lz0 + lz1) / 2;
-          building(lx0 + 2, lz0 + 2, lx1 - 2, mz - 4, rng.range(9, 14), 'shed', rng.pick(SHED_TINTS), false);
+          building(lx0 + 2, lz0 + 2, lx1 - 2, mz - 4, rng.range(9, 14), 'shed', rng.pick(SHED_TINTS));
           // stacks of shipping containers in the southern half
           for (let k = 0; k < 10; k += 1) {
             const cx = lx0 + 6 + (k % 5) * 12.5;
@@ -450,7 +528,7 @@ export class City {
               const a = lx0 + gx * cw + 4;
               const b = lz0 + gz * cw + 4;
               lawns.flat(lx0 + gx * cw + 0.5, lz0 + gz * cw + 0.5, lx0 + (gx + 1) * cw - 0.5, lz0 + (gz + 1) * cw - 0.5, CITY.curb + 0.02, col('#ffffff'), [4, 4]);
-              building(a, b, a + cw - 8, b + cw - 8, rng.range(5, 8.5), 'stucco', tint(), false);
+              building(a, b, a + cw - 8, b + cw - 8, rng.range(5, 8.5), 'stucco', tint());
             }
           }
         } else if (dist === 'palmline') {
@@ -459,8 +537,8 @@ export class City {
           for (let k = 0; k < n; k += 1) {
             const a = lx0 + k * cw + 2;
             const depth = rng.range(30, 44);
-            building(a, lz1 - depth, a + cw - 4, lz1 - 2, rng.range(14, 34), 'stucco', tint(), false);
-            building(a + 3, lz0 + 3, a + cw - 7, lz0 + 18, rng.range(8, 14), 'stucco', tint(), false);
+            building(a, lz1 - depth, a + cw - 4, lz1 - 2, rng.range(14, 34), 'stucco', tint(), { shops: true, balconies: true });
+            building(a + 3, lz0 + 3, a + cw - 7, lz0 + 18, rng.range(8, 14), 'stucco', tint(), { shops: true });
           }
         } else {
           // midtown and Little Marisco: mid-rise blocks with alleys
@@ -473,7 +551,8 @@ export class City {
               const a = lx0 + gx * cw + 2;
               const b = lz0 + gz * cd + 2;
               const hi = dist === 'marisco' ? rng.range(9, 24) : rng.range(12, 36);
-              building(a, b, a + cw - 4, b + cd - 4, hi, hi > 26 && rng.chance(0.4) ? 'glass' : 'stucco', tint(), false);
+              const glassy = hi > 26 && rng.chance(0.4);
+              building(a, b, a + cw - 4, b + cd - 4, hi, glassy ? 'glass' : 'stucco', tint(), { shops: true, balconies: !glassy && rng.chance(0.45) });
             }
           }
         }
@@ -483,27 +562,35 @@ export class City {
     const tex = {};
     for (const kind of kinds) tex[kind] = facadeTextures(kind, kind.length * 31);
     for (const kind of kinds) {
+      // physically based facades: the normal map gives recessed windows and frames depth, the
+      // roughness/metalness map lets the glass mirror the sky while the walls stay matte
       const mat = new THREE.MeshStandardMaterial({
         map: tex[kind].map,
+        normalMap: tex[kind].normal,
+        normalScale: new THREE.Vector2(1.1, 1.1),
+        roughnessMap: tex[kind].orm,
+        metalnessMap: tex[kind].orm,
+        roughness: 1,
+        metalness: 1,
         vertexColors: true,
-        roughness: kind === 'glass' ? 0.35 : 0.85,
-        metalness: kind === 'glass' ? 0.25 : 0,
+        envMapIntensity: kind === 'glass' ? 1.15 : 0.75,
         emissive: new THREE.Color('#ffffff'),
         emissiveMap: tex[kind].night,
         emissiveIntensity: 0,
       });
+      mat.userData.nightScale = kind === 'shop' ? 0.32 : 0.9;
       this.nightMaterials.push(mat);
       const mesh = new THREE.Mesh(walls[kind].build(), mat);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       this.group.add(mesh);
     }
-    const roofMesh = new THREE.Mesh(roofs.build(), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }));
+    const roofMesh = new THREE.Mesh(roofs.build(), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.78, envMapIntensity: 0.6 }));
     roofMesh.castShadow = true;
     roofMesh.receiveShadow = true;
     this.group.add(roofMesh);
 
-    const walkMesh = new THREE.Mesh(walks.build(), new THREE.MeshStandardMaterial({ map: walkTile, vertexColors: true, roughness: 0.95 }));
+    const walkMesh = new THREE.Mesh(walks.build(), new THREE.MeshStandardMaterial({ map: walkTile, normalMap: sidewalkNormal(), vertexColors: true, roughness: 0.9, envMapIntensity: 0.5 }));
     walkMesh.receiveShadow = true;
     this.group.add(walkMesh);
     const lawnTex = grassTexture();
@@ -520,11 +607,11 @@ export class City {
     const sand = sandTexture();
     sand.repeat.set(140, 10);
     const beach = new THREE.Mesh(
-      new THREE.PlaneGeometry(1300, CITY.shore + 18),
-      new THREE.MeshStandardMaterial({ map: sand, roughness: 1 }),
+      new THREE.PlaneGeometry(1300, CITY.shore + 2),
+      new THREE.MeshStandardMaterial({ map: sand, color: '#e6dccb', roughness: 1, envMapIntensity: 0.35 }),
     );
     beach.rotation.x = -Math.PI / 2;
-    beach.position.set(0, 0.01, south + (CITY.shore + 18) / 2);
+    beach.position.set(0, 0.01, south + (CITY.shore + 2) / 2);
     beach.receiveShadow = true;
     this.group.add(beach);
 
@@ -645,8 +732,16 @@ export class City {
   buildHills() {
     const rng = makeRng(99);
     const group = new THREE.Group();
-    const geo = new THREE.ConeGeometry(1, 1, 7, 1);
-    const mat = new THREE.MeshStandardMaterial({ color: '#8fa86a', roughness: 1, flatShading: true });
+    // rounded hills: squashed half-spheres with a soft vertical colour ramp (green to dry gold)
+    const geo = new THREE.SphereGeometry(1, 28, 12, 0, Math.PI * 2, 0, Math.PI / 2);
+    const colors = [];
+    const pa = geo.attributes.position;
+    for (let i = 0; i < pa.count; i += 1) {
+      const c = new THREE.Color('#6f8f4e').lerp(new THREE.Color('#c9b27a'), Math.pow(pa.getY(i), 1.5));
+      colors.push(c.r, c.g, c.b);
+    }
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, envMapIntensity: 0.3 });
     const count = 46;
     const inst = new THREE.InstancedMesh(geo, mat, count);
     const m = new THREE.Matrix4();
@@ -655,7 +750,7 @@ export class City {
       const r = rng.range(760, 1000);
       const h = rng.range(90, 230);
       const w = rng.range(160, 280);
-      m.compose(new THREE.Vector3(Math.cos(a) * r, h / 2 - 4, Math.sin(a) * r), new THREE.Quaternion(), new THREE.Vector3(w, h, w * 0.8));
+      m.compose(new THREE.Vector3(Math.cos(a) * r, -6, Math.sin(a) * r), new THREE.Quaternion(), new THREE.Vector3(w, h * 0.75, w * 0.8));
       inst.setMatrixAt(k, m);
     }
     group.add(inst);
@@ -702,7 +797,7 @@ export class City {
 
   /** Night factor 0..1 lights up windows and lamps; time animates the sea. */
   update(time, night) {
-    for (const m of this.nightMaterials) m.emissiveIntensity = night * 0.9;
+    for (const m of this.nightMaterials) m.emissiveIntensity = night * m.userData.nightScale;
     this.lampMaterial.emissiveIntensity = night * 2.2;
     this.water.material.uniforms.uTime.value = time;
   }

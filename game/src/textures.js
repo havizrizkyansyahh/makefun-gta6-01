@@ -28,86 +28,178 @@ function speckle(ctx, w, h, count, rng, colors, size = 2) {
 }
 
 /**
- * A facade tile covering 16 m x 14 m of wall (4 window columns, 4 floors), plus its night map.
- * kind: 'glass' for downtown towers, 'stucco' for homes and hotels, 'shed' for warehouses.
+ * Turn a greyscale height canvas into a tangent-space normal map: brighter is nearer the viewer,
+ * so recessed windows, raised frames, tile grooves and corrugations catch the light.
+ */
+export function normalFromHeight(src, strength = 2.5) {
+  const w = src.width;
+  const h = src.height;
+  const data = src.getContext('2d').getImageData(0, 0, w, h).data;
+  const [c, g] = canvas(w, h);
+  const out = g.createImageData(w, h);
+  const H = (x, y) => data[(((y + h) % h) * w + ((x + w) % w)) * 4] / 255;
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      let nx = (H(x - 1, y) - H(x + 1, y)) * strength;
+      let ny = (H(x, y + 1) - H(x, y - 1)) * strength;
+      let nz = 1;
+      const l = Math.hypot(nx, ny, nz);
+      nx /= l; ny /= l; nz /= l;
+      const i = (y * w + x) * 4;
+      out.data[i] = (nx * 0.5 + 0.5) * 255;
+      out.data[i + 1] = (ny * 0.5 + 0.5) * 255;
+      out.data[i + 2] = (nz * 0.5 + 0.5) * 255;
+      out.data[i + 3] = 255;
+    }
+  }
+  g.putImageData(out, 0, 0);
+  return finish(c, true, false);
+}
+
+/**
+ * Paints the same layout into four layers at once: colour, night windows, height (for the normal
+ * map) and roughness/metalness (green = roughness, blue = metalness, as three.js reads them).
+ */
+function layers(S) {
+  const L = {};
+  for (const k of ['map', 'night', 'height', 'orm']) [L[k + 'C'], L[k]] = canvas(S, S);
+  L.night.fillStyle = '#000';
+  L.night.fillRect(0, 0, S, S);
+  L.rect = (x, y, w, h, color, height, rough, metal = 0) => {
+    L.map.fillStyle = color;
+    L.map.fillRect(x, y, w, h);
+    const hv = Math.round(height * 255);
+    L.height.fillStyle = `rgb(${hv},${hv},${hv})`;
+    L.height.fillRect(x, y, w, h);
+    L.orm.fillStyle = `rgb(255,${Math.round(rough * 255)},${Math.round(metal * 255)})`;
+    L.orm.fillRect(x, y, w, h);
+  };
+  return L;
+}
+
+/**
+ * A facade tile covering 16 m x 14 m of wall (4 window columns, 4 floors), with its night,
+ * normal and roughness/metalness maps. kind: 'glass' curtain wall for towers, 'stucco' for
+ * homes and hotels, 'shed' corrugated metal for warehouses, 'shop' for street-level storefronts
+ * (one tile is 8 m x 4.5 m).
  */
 export function facadeTextures(kind, seed) {
   const rng = makeRng(seed);
-  const S = 256;
-  const [c, g] = canvas(S, S);
-  const [n, ng] = canvas(S, S);
-  ng.fillStyle = '#000';
-  ng.fillRect(0, 0, S, S);
+  const S = 512;
+  const L = layers(S);
   const cols = 4;
   const rows = 4;
   const cw = S / cols;
   const rh = S / rows;
+  const lit = (x, y, w, h, colors, p) => {
+    if (!rng.chance(p)) return;
+    const grad = L.night.createLinearGradient(x, y, x, y + h);
+    const col = rng.pick(colors);
+    grad.addColorStop(0, col);
+    grad.addColorStop(1, 'rgba(0,0,0,0.6)');
+    L.night.fillStyle = grad;
+    L.night.fillRect(x, y, w, h);
+  };
   if (kind === 'glass') {
-    g.fillStyle = '#d9e2ea';
-    g.fillRect(0, 0, S, S);
+    L.rect(0, 0, S, S, '#c9d3dc', 0.6, 0.5, 0.6);
     for (let r = 0; r < rows; r += 1) {
+      // spandrel band at each floor slab
+      L.rect(0, r * rh, S, 18, '#9aa7b3', 0.55, 0.45, 0.5);
       for (let k = 0; k < cols; k += 1) {
-        const x = k * cw + 3;
-        const y = r * rh + 4;
-        const grad = g.createLinearGradient(x, y, x + cw, y + rh);
-        grad.addColorStop(0, '#2d4f6e');
-        grad.addColorStop(0.55, '#5f8db0');
-        grad.addColorStop(1, '#253f58');
-        g.fillStyle = grad;
-        g.fillRect(x, y, cw - 6, rh - 8);
-        g.fillStyle = 'rgba(255,255,255,0.18)';
-        g.fillRect(x + 4, y + 3, 6, rh - 14);
-        if (rng.chance(0.42)) {
-          ng.fillStyle = rng.pick(['#ffd9a0', '#fff1c9', '#bfe3ff', '#ffc37a']);
-          ng.fillRect(x, y, cw - 6, rh - 8);
-        }
+        const x = k * cw + 5;
+        const y = r * rh + 22;
+        const w = cw - 10;
+        const h = rh - 26;
+        const tint = rng.pick(['#3b5d7a', '#46698a', '#35546f', '#4f7695']);
+        L.rect(x, y, w, h, tint, 0.3, 0.05, 0.9);
+        L.rect(x + w / 2 - 2, y, 4, h, '#d0d8e0', 0.7, 0.35, 0.8);
+        lit(x, y, w, h, ['#ffe2b0', '#fff1d6', '#cfe8ff', '#ffd08a'], 0.4);
       }
     }
   } else if (kind === 'stucco') {
-    g.fillStyle = '#f4ede2';
-    g.fillRect(0, 0, S, S);
-    speckle(g, S, S, 900, rng, ['#e8dfd0', '#fbf6ee', '#e2d6c4'], 2);
+    L.rect(0, 0, S, S, '#f3ece1', 0.6, 0.92, 0);
+    for (let i = 0; i < 2600; i += 1) {
+      const v = rng.next();
+      L.map.fillStyle = v < 0.5 ? 'rgba(120,100,80,0.06)' : 'rgba(255,255,255,0.08)';
+      L.map.fillRect(rng.next() * S, rng.next() * S, 3, 3);
+    }
     for (let r = 0; r < rows; r += 1) {
       for (let k = 0; k < cols; k += 1) {
-        const x = k * cw + 16;
-        const y = r * rh + 14;
-        g.fillStyle = '#3c4a57';
-        g.fillRect(x, y, cw - 32, rh - 26);
-        g.fillStyle = '#7fa3bd';
-        g.fillRect(x + 3, y + 3, cw - 38, (rh - 32) / 2);
-        g.fillStyle = '#ffffff';
-        g.fillRect(x - 4, y + rh - 26, cw - 24, 4);
-        // Shutters on some windows give the beach blocks a holiday look.
+        const x = k * cw + 30;
+        const y = r * rh + 22;
+        const w = cw - 60;
+        const h = rh - 46;
+        L.rect(x - 6, y - 6, w + 12, h + 12, '#ffffff', 0.85, 0.7, 0);       // frame
+        L.rect(x, y, w, h, '#2f3d4a', 0.12, 0.06, 0.6);                        // glass, recessed
+        L.rect(x + w / 2 - 2, y, 4, h, '#e8e8e8', 0.4, 0.6, 0);                // mullion
+        L.rect(x, y + h * 0.42, w, 3, '#e8e8e8', 0.4, 0.6, 0);
+        L.rect(x - 12, y + h + 6, w + 24, 8, '#ffffff', 1, 0.7, 0);            // sill
         if ((r + k) % 3 === 0) {
-          g.fillStyle = 'rgba(40,120,120,0.85)';
-          g.fillRect(x - 9, y, 7, rh - 26);
-          g.fillRect(x + cw - 34, y, 7, rh - 26);
+          L.rect(x - 24, y - 4, 16, h + 8, '#2a8a8a', 0.8, 0.6, 0);            // shutters
+          L.rect(x + w + 8, y - 4, 16, h + 8, '#2a8a8a', 0.8, 0.6, 0);
         }
-        if (rng.chance(0.38)) {
-          ng.fillStyle = rng.pick(['#ffcf87', '#ffe3ae', '#ffb86b']);
-          ng.fillRect(x, y, cw - 32, rh - 26);
-        }
+        lit(x, y, w, h, ['#ffcf87', '#ffe3ae', '#ffb86b'], 0.36);
       }
     }
-  } else {
-    g.fillStyle = '#c9c4b8';
-    g.fillRect(0, 0, S, S);
-    for (let x = 0; x < S; x += 8) {
-      g.fillStyle = x % 16 === 0 ? 'rgba(0,0,0,0.10)' : 'rgba(255,255,255,0.10)';
-      g.fillRect(x, 0, 4, S);
+  } else if (kind === 'shed') {
+    L.rect(0, 0, S, S, '#c4bfb3', 0.5, 0.55, 0.5);
+    for (let x = 0; x < S; x += 4) {
+      const v = 0.5 + 0.45 * Math.sin((x / 16) * Math.PI * 2);
+      const hv = Math.round(v * 255);
+      L.height.fillStyle = `rgb(${hv},${hv},${hv})`;
+      L.height.fillRect(x, 0, 4, S);
+      L.map.fillStyle = v > 0.6 ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)';
+      L.map.fillRect(x, 0, 4, S);
     }
-    g.fillStyle = '#4c5966';
-    for (let k = 0; k < cols; k += 1) g.fillRect(k * cw + 10, 30, cw - 20, 18);
-    g.fillStyle = 'rgba(0,0,0,0.25)';
-    g.fillRect(0, S - 10, S, 10);
     for (let k = 0; k < cols; k += 1) {
-      if (rng.chance(0.3)) {
-        ng.fillStyle = '#ffd38a';
-        ng.fillRect(k * cw + 10, 30, cw - 20, 18);
-      }
+      L.rect(k * cw + 18, 50, cw - 36, 34, '#4c5966', 0.2, 0.1, 0.6);
+      lit(k * cw + 18, 50, cw - 36, 34, ['#ffd38a'], 0.3);
     }
+    L.rect(0, S - 22, S, 22, '#8d8a82', 0.6, 0.8, 0.1);
+  } else {
+    // storefront: two big display windows, a door and a sign band
+    L.rect(0, 0, S, S, '#3a3430', 0.65, 0.6, 0.2);
+    L.rect(0, 0, S, 92, rng.pick(['#c0392b', '#1e6f8a', '#2d6a4f', '#8a4fbf', '#d4862b']), 0.75, 0.5, 0.1);
+    L.rect(14, 108, 210, 360, '#26333d', 0.15, 0.12, 0.3);
+    L.rect(288, 108, 210, 360, '#26333d', 0.15, 0.12, 0.3);
+    L.rect(236, 140, 40, 372, '#4a2e1c', 0.4, 0.5, 0);
+    for (const x of [14, 288]) {
+      L.rect(x + 103, 108, 5, 360, '#b8b8b8', 0.7, 0.3, 0.9);
+      L.night.fillStyle = rng.pick(['#ffe6b3', '#fff4dc', '#ffd59a']);
+      L.night.fillRect(x, 108, 210, 360);
+    }
+    L.night.fillStyle = '#ffffff';
+    L.night.fillRect(0, 20, S, 52);
   }
-  return { map: finish(c), night: finish(n) };
+  return {
+    map: finish(L.mapC),
+    night: finish(L.nightC),
+    normal: normalFromHeight(L.heightC, kind === 'shed' ? 3 : 4),
+    orm: finish(L.ormC, true, false),
+  };
+}
+
+export function sidewalkNormal() {
+  const [c, g] = canvas(128, 128);
+  g.fillStyle = '#9a9a9a';
+  g.fillRect(0, 0, 128, 128);
+  g.strokeStyle = '#303030';
+  g.lineWidth = 3;
+  g.strokeRect(1, 1, 126, 126);
+  g.beginPath();
+  g.moveTo(64, 0); g.lineTo(64, 128);
+  g.moveTo(0, 64); g.lineTo(128, 64);
+  g.stroke();
+  return normalFromHeight(c, 3);
+}
+
+export function asphaltNormal() {
+  const rng = makeRng(13);
+  const [c, g] = canvas(256, 256);
+  g.fillStyle = '#808080';
+  g.fillRect(0, 0, 256, 256);
+  speckle(g, 256, 256, 9000, rng, ['#6a6a6a', '#9a9a9a', '#747474', '#8c8c8c'], 2);
+  return normalFromHeight(c, 1.2);
 }
 
 export function sidewalkTexture() {

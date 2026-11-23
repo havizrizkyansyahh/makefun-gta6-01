@@ -3,6 +3,7 @@
 // player, a traffic driver or a police officer is at the wheel. Also car-to-car collisions.
 import * as THREE from '../vendor/three.module.min.js';
 import { clamp, damp, wrapAngle } from './rng.js';
+import { mergeParts, mat4 } from './geometry.js';
 
 /** The city's own makes. len/wid/hgt in metres; power m/s^2, top m/s, grip, turn rad/s. */
 export const MODELS = {
@@ -20,115 +21,231 @@ export const MODELS = {
 export const TRAFFIC_MIX = ['brisa', 'brisa', 'corso', 'corso', 'corso', 'marlin', 'pelican', 'halden', 'bayrunner', 'ardent'];
 
 const box = new THREE.BoxGeometry(1, 1, 1);
-const wheelGeo = new THREE.CylinderGeometry(0.36, 0.36, 0.26, 12);
-wheelGeo.rotateZ(Math.PI / 2);
-const hubGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.28, 8);
-hubGeo.rotateZ(Math.PI / 2);
+const tyreGeo = new THREE.TorusGeometry(0.27, 0.105, 10, 22);
+tyreGeo.rotateY(Math.PI / 2);
+const rimGeo = new THREE.CylinderGeometry(0.21, 0.23, 0.2, 16);
+rimGeo.rotateZ(Math.PI / 2);
+const capGeo = new THREE.CylinderGeometry(0.07, 0.07, 0.22, 10);
+capGeo.rotateZ(Math.PI / 2);
+const spokeGeo = new THREE.BoxGeometry(0.21, 0.035, 0.36);
+const lampGeo = new THREE.SphereGeometry(0.16, 14, 10);
+const barGeo = new THREE.CapsuleGeometry(0.07, 0.4, 4, 10);
+barGeo.rotateZ(Math.PI / 2);
 const shared = {
-  glass: new THREE.MeshStandardMaterial({ color: '#1d2a38', roughness: 0.15, metalness: 0.6 }),
-  tyre: new THREE.MeshStandardMaterial({ color: '#16171a', roughness: 0.9 }),
-  hub: new THREE.MeshStandardMaterial({ color: '#c9ccd1', roughness: 0.3, metalness: 0.8 }),
-  trim: new THREE.MeshStandardMaterial({ color: '#202226', roughness: 0.7 }),
-  charred: new THREE.MeshStandardMaterial({ color: '#1a1a1a', roughness: 1 }),
-  chrome: new THREE.MeshStandardMaterial({ color: '#dfe3e8', roughness: 0.2, metalness: 0.9 }),
+  glass: new THREE.MeshPhysicalMaterial({ color: '#0c141d', roughness: 0.04, metalness: 0.2, clearcoat: 1, envMapIntensity: 1.6 }),
+  tyre: new THREE.MeshStandardMaterial({ color: '#141416', roughness: 0.88 }),
+  hub: new THREE.MeshStandardMaterial({ color: '#d4d8de', roughness: 0.22, metalness: 0.95 }),
+  trim: new THREE.MeshStandardMaterial({ color: '#16181c', roughness: 0.55, metalness: 0.2 }),
+  charred: new THREE.MeshStandardMaterial({ color: '#191919', roughness: 1 }),
+  chrome: new THREE.MeshStandardMaterial({ color: '#e4e8ee', roughness: 0.12, metalness: 1 }),
   checker: new THREE.MeshStandardMaterial({ color: '#111111', roughness: 0.6 }),
+  plate: new THREE.MeshStandardMaterial({ color: '#f2f0e6', roughness: 0.5 }),
+  driverBody: new THREE.MeshStandardMaterial({ color: '#39404c', roughness: 0.8 }),
+  driverSkin: new THREE.MeshStandardMaterial({ color: '#b98060', roughness: 0.6 }),
 };
 
-function addBox(parent, material, sx, sy, sz, x, y, z) {
-  const m = new THREE.Mesh(box, material);
-  m.scale.set(sx, sy, sz);
-  m.position.set(x, y, z);
-  m.castShadow = true;
-  parent.add(m);
-  return m;
+/** Extrude a side profile (u along the car, front positive; v up) across the car's width. */
+function extrudeProfile(shape, width, bevel) {
+  const g = new THREE.ExtrudeGeometry(shape, {
+    depth: Math.max(0.01, width - bevel * 2), bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel * 0.8, bevelSegments: 4, curveSegments: 12,
+  });
+  g.translate(0, 0, -(width - bevel * 2) / 2);
+  g.rotateY(-Math.PI / 2);
+  g.computeVertexNormals();
+  return g;
 }
+
+// cabin layout per body style, as fractions of the length: base rear/front, roof rear/front
+const CABINS = {
+  sedan: [-0.29, 0.17, -0.2, 0.02],
+  coupe: [-0.3, 0.14, -0.13, -0.01],
+  hatch: [-0.47, 0.18, -0.45, -0.01],
+  muscle: [-0.26, 0.08, -0.15, -0.04],
+  van: [-0.49, 0.33, -0.49, 0.2],
+  pickup: [-0.06, 0.2, -0.05, 0.08],
+};
+const geoCache = new Map();
+
+/** Body and cabin geometry for a make, cached so every car of a make shares them. */
+function bodyGeometry(spec) {
+  if (geoCache.has(spec.name)) return geoCache.get(spec.name);
+  const L = spec.len;
+  const W = spec.wid;
+  const H = spec.hgt;
+  const b = 0.24;
+  const deck = H * (spec.body === 'van' ? 0.42 : 0.44);
+  const top = b + H;
+  const [cr0, cf0, cr1, cf1] = CABINS[spec.body].map((f) => f * L);
+  const wz = L / 2 - 0.85;
+  const ar = 0.45;
+  const ac = 0.37;
+  const d = Math.asin(Math.min(0.99, (ac - b) / ar));
+  const s = new THREE.Shape();
+  s.moveTo(-L / 2 + 0.22, b);
+  s.absarc(-wz, ac, ar, Math.PI + d, -d, true);
+  s.absarc(wz, ac, ar, Math.PI + d, -d, true);
+  s.lineTo(L / 2 - 0.22, b);
+  s.quadraticCurveTo(L / 2, b, L / 2, b + 0.2);
+  s.lineTo(L / 2, b + deck * 0.55);
+  s.quadraticCurveTo(L / 2, b + deck * 0.86, L / 2 - 0.4, b + deck * 0.9);
+  s.lineTo(cf0 + 0.15, b + deck);
+  s.lineTo(cr0 - 0.1, b + deck);
+  if (spec.body === 'coupe' || spec.body === 'muscle') s.lineTo(-L / 2 + 0.25, b + deck * 0.98);
+  s.quadraticCurveTo(-L / 2, b + deck * 0.95, -L / 2, b + deck * 0.62);
+  s.lineTo(-L / 2, b + 0.2);
+  s.quadraticCurveTo(-L / 2, b, -L / 2 + 0.22, b);
+  const lower = extrudeProfile(s, W, 0.09);
+
+  const c = new THREE.Shape();
+  const v0 = b + deck - 0.04;
+  c.moveTo(cr0, v0);
+  c.lineTo(cf0, v0);
+  c.quadraticCurveTo(cf1 + (cf0 - cf1) * 0.2, top - 0.02, cf1, top);
+  c.lineTo(cr1, top);
+  c.quadraticCurveTo(cr0 + (cr1 - cr0) * 0.15, top - 0.04, cr0, v0);
+  const cabin = extrudeProfile(c, W * 0.86, 0.07);
+
+  const r = new THREE.Shape();
+  r.moveTo(cr1 - 0.04, top - 0.07);
+  r.lineTo(cf1 + 0.03, top - 0.07);
+  r.lineTo(cf1 - 0.04, top + 0.015);
+  r.lineTo(cr1 + 0.04, top + 0.015);
+  r.closePath();
+  const roof = extrudeProfile(r, W * 0.88, 0.04);
+  const out = { lower, cabin, roof, b, deck, top, cr0, cf0, cr1, cf1, wz };
+  geoCache.set(spec.name, out);
+  return out;
+}
+
+const modelCache = new Map();
+
+/**
+ * Every static part of a make, merged by material once and shared by all cars of that make:
+ * paint panels, dark trim (with plates, grille, police doors and taxi checkers as vertex
+ * colours), glass, lamps, light bars, one wheel and a seated driver.
+ */
+function modelParts(spec) {
+  if (modelCache.has(spec.name)) return modelCache.get(spec.name);
+  const L = spec.len;
+  const W = spec.wid;
+  const g = bodyGeometry(spec);
+  const { b, deck, top } = g;
+  const paint = [];
+  const trim = [];
+  const I = new THREE.Matrix4();
+  const P = (list, geo, x, y, z, sx = 1, sy = 1, sz = 1, color = '#ffffff', rx = 0) => list.push({ geo, matrix: mat4(x, y, z, sx, sy, sz, rx), color });
+  paint.push({ geo: g.lower, matrix: I }, { geo: g.roof, matrix: I });
+  const midU = (g.cr0 + g.cf0) / 2;
+  P(paint, box, 0, b + deck + (top - b - deck) / 2 - 0.03, midU - 0.05, W * 0.875, top - b - deck, 0.12);
+  P(trim, box, 0, b + 0.1, 0, W + 0.01, 0.08, L * 0.5, '#16181c');
+  if (spec.body === 'van' || spec.body === 'hatch') {
+    const u0 = g.cr0 + 0.05;
+    const u1 = spec.body === 'van' ? 0.02 * L : g.cr0 + 0.35;
+    P(paint, box, 0, b + deck + (top - b - deck) * 0.43, (u0 + u1) / 2, W * 0.875, (top - b - deck) * 0.86, u1 - u0);
+  }
+  if (spec.body === 'pickup') {
+    for (const sx of [-1, 1]) P(paint, box, sx * (W / 2 - 0.06), b + deck + 0.17, -L * 0.25, 0.07, 0.38, L * 0.42);
+    P(paint, box, 0, b + deck + 0.17, -L / 2 + 0.08, W - 0.05, 0.38, 0.07);
+    P(trim, box, 0, b + deck + 0.005, -L * 0.25, W - 0.15, 0.02, L * 0.42, '#16181c');
+  }
+  if (spec.body === 'muscle' || spec.body === 'coupe') P(trim, box, 0, b + deck + 0.14, -L / 2 + 0.22, W * 0.86, 0.04, 0.3, '#16181c');
+  if (spec.body === 'muscle') P(trim, box, 0, b + deck + 0.02, L * 0.25, 0.5, 0.09, 0.8, '#16181c');
+  P(trim, box, 0, b + deck * 0.42, L / 2 + 0.01, W * 0.5, deck * 0.22, 0.05, '#16181c');
+  P(trim, box, 0, b + 0.24, L / 2 + 0.03, 0.42, 0.1, 0.02, '#f2f0e6');
+  P(trim, box, 0, b + deck * 0.45, -L / 2 - 0.02, 0.42, 0.1, 0.02, '#f2f0e6');
+  for (const sx of [-1, 1]) P(paint, box, sx * (W / 2 + 0.04), b + deck + 0.12, g.cf0 - 0.05, 0.16, 0.09, 0.12);
+  const roofY = top + 0.07;
+  const roofU = (g.cr1 + g.cf1) / 2;
+  if (spec.police) {
+    P(trim, box, 0, b + deck * 0.38, -L * 0.04, W + 0.015, deck * 0.5, L * 0.42, '#16203a');
+    P(trim, box, 0, b + deck * 0.91 + 0.01, L * 0.33, W * 0.6, 0.02, L * 0.25, '#16203a');
+    P(trim, box, 0, roofY, roofU, W * 0.66, 0.05, 0.26, '#16181c');
+  }
+  if (spec.taxi) P(trim, box, 0, b + deck * 0.62, 0, W + 0.015, 0.1, L * 0.5, '#111111');
+  const head = [];
+  const tail = [];
+  for (const sx of [-1, 1]) {
+    P(head, lampGeo, sx * (W / 2 - 0.3), b + deck * 0.66, L / 2 - 0.08, 1.15, 0.55, 0.55);
+    P(tail, box, sx * (W / 2 - 0.32), b + deck * 0.72, -L / 2 - 0.005, 0.5, 0.12, 0.06);
+  }
+  // one wheel: tyre, alloy rim, three spoke bars and a hub cap
+  const wheel = [];
+  P(wheel, tyreGeo, 0, 0, 0, 1, 1, 1, '#141416');
+  P(wheel, rimGeo, 0, 0, 0, 1, 0.92, 0.92, '#cfd4da');
+  P(wheel, capGeo, 0, 0, 0, 1, 1, 1, '#1a1c20');
+  for (let k = 0; k < 3; k += 1) P(wheel, spokeGeo, 0, 0, 0, 1, 1, 1, '#cfd4da', (k / 3) * Math.PI);
+  const driver = [];
+  P(driver, new THREE.CapsuleGeometry(0.17, 0.2, 4, 10), 0, 0, 0, 1, 1, 0.7, '#39404c');
+  P(driver, new THREE.SphereGeometry(0.11, 14, 10), 0, 0.33, 0.02, 1, 1, 1, '#b98060');
+  const out = {
+    g,
+    paint: mergeParts(paint, false),
+    trim: mergeParts(trim, true),
+    head: mergeParts(head, false),
+    tail: mergeParts(tail, false),
+    wheel: mergeParts(wheel, true),
+    driver: mergeParts(driver, true),
+    roofY,
+    roofU,
+  };
+  modelCache.set(spec.name, out);
+  return out;
+}
+
+const wheelMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0.55 });
+const trimMat = new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.45, metalness: 0.3, clearcoat: 0.5 });
+const driverMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.75 });
 
 /** Build the model for a make, facing +z. Returns the parts the simulation animates. */
 function buildModel(spec, color) {
   const root = new THREE.Group();
   const body = new THREE.Group();
   root.add(body);
-  const paint = new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.35 });
-  const L = spec.len;
+  const parts = modelParts(spec);
   const W = spec.wid;
-  const H = spec.hgt;
-  const base = 0.32;
-  const deck = H * 0.45;
-  addBox(body, paint, W, deck, L, 0, base + deck / 2, 0);
-  addBox(body, shared.trim, W + 0.04, 0.16, 0.25, 0, base + 0.08, L / 2 - 0.05);
-  addBox(body, shared.trim, W + 0.04, 0.16, 0.25, 0, base + 0.08, -L / 2 + 0.05);
-  const top = base + deck;
-  let cabinLen = L * 0.48;
-  let cabinZ = -L * 0.05;
-  let cabinH = H - deck - 0.05;
-  if (spec.body === 'coupe') { cabinLen = L * 0.4; cabinZ = -L * 0.08; }
-  if (spec.body === 'hatch') { cabinLen = L * 0.58; cabinZ = -L * 0.12; }
-  if (spec.body === 'muscle') { cabinLen = L * 0.38; cabinZ = -L * 0.1; }
-  if (spec.body === 'van') { cabinLen = L * 0.8; cabinZ = -L * 0.08; }
-  if (spec.body === 'pickup') { cabinLen = L * 0.34; cabinZ = L * 0.08; }
-  // glass house, then a painted roof slab
-  addBox(body, shared.glass, W * 0.86, cabinH * 0.8, cabinLen, 0, top + cabinH * 0.4, cabinZ);
-  addBox(body, paint, W * 0.88, 0.09, cabinLen * 0.86, 0, top + cabinH * 0.82, cabinZ - cabinLen * 0.03);
-  if (spec.body === 'van') addBox(body, paint, W * 0.9, cabinH * 0.62, cabinLen * 0.7, 0, top + cabinH * 0.42, cabinZ - cabinLen * 0.14);
-  if (spec.body === 'pickup') {
-    addBox(body, paint, 0.08, 0.4, L * 0.42, W / 2 - 0.04, top + 0.2, -L * 0.25);
-    addBox(body, paint, 0.08, 0.4, L * 0.42, -W / 2 + 0.04, top + 0.2, -L * 0.25);
-    addBox(body, paint, W, 0.4, 0.08, 0, top + 0.2, -L / 2 + 0.04);
-  }
-  if (spec.body === 'muscle' || spec.body === 'coupe') {
-    addBox(body, shared.trim, W * 0.9, 0.06, 0.32, 0, top + 0.12, -L / 2 + 0.2); // spoiler
-  }
-  if (spec.body === 'muscle') addBox(body, shared.trim, 0.5, 0.12, 0.9, 0, top + 0.05, L * 0.28); // hood scoop
-
-  // lights
-  const head = new THREE.MeshStandardMaterial({ color: '#fffbe6', emissive: '#fff3c4', emissiveIntensity: 0.3 });
-  const tail = new THREE.MeshStandardMaterial({ color: '#8b0000', emissive: '#ff2020', emissiveIntensity: 0.4 });
-  for (const s of [-1, 1]) {
-    addBox(body, head, 0.42, 0.14, 0.06, s * (W / 2 - 0.3), base + deck * 0.7, L / 2 + 0.01);
-    addBox(body, tail, 0.42, 0.14, 0.06, s * (W / 2 - 0.3), base + deck * 0.7, -L / 2 - 0.01);
-  }
+  const { g } = parts;
+  const paint = new THREE.MeshPhysicalMaterial({ color, roughness: 0.28, metalness: 0.55, clearcoat: 1, clearcoatRoughness: 0.06, envMapIntensity: 1.2 });
+  const head = new THREE.MeshStandardMaterial({ color: '#fffbe6', emissive: '#fff3c4', emissiveIntensity: 0.3, roughness: 0.1 });
+  const tail = new THREE.MeshStandardMaterial({ color: '#7a0000', emissive: '#ff2020', emissiveIntensity: 0.4, roughness: 0.2 });
+  const add = (geo, material, parent = body) => {
+    const m = new THREE.Mesh(geo, material);
+    m.castShadow = true;
+    parent.add(m);
+    return m;
+  };
+  add(parts.paint, paint).receiveShadow = true;
+  add(g.cabin, shared.glass);
+  add(parts.trim, trimMat);
+  add(parts.head, head);
+  add(parts.tail, tail);
   let sirens = null;
   if (spec.police) {
-    // dark lower doors and hood stripe, roof light bar
-    const navy = new THREE.MeshStandardMaterial({ color: '#1c2541', roughness: 0.5 });
-    addBox(body, navy, W + 0.02, deck * 0.55, L * 0.45, 0, base + deck * 0.3, -L * 0.03);
     const red = new THREE.MeshStandardMaterial({ color: '#550000', emissive: '#ff1a1a', emissiveIntensity: 0 });
     const blue = new THREE.MeshStandardMaterial({ color: '#000855', emissive: '#2a5bff', emissiveIntensity: 0 });
-    const roofY = top + cabinH * 0.9;
-    addBox(body, shared.trim, W * 0.7, 0.08, 0.32, 0, roofY, cabinZ);
-    addBox(body, red, W * 0.32, 0.14, 0.28, -W * 0.18, roofY + 0.1, cabinZ);
-    addBox(body, blue, W * 0.32, 0.14, 0.28, W * 0.18, roofY + 0.1, cabinZ);
+    add(barGeo, red).position.set(-W * 0.17, parts.roofY + 0.07, parts.roofU);
+    add(barGeo, blue).position.set(W * 0.17, parts.roofY + 0.07, parts.roofU);
     sirens = { red, blue };
   }
   if (spec.taxi) {
-    addBox(body, shared.checker, W * 0.9, 0.12, L * 0.9, 0, base + deck * 0.35, 0).scale.x = W + 0.03;
     const sign = new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: '#ffe08a', emissiveIntensity: 0.4 });
-    addBox(body, sign, 0.7, 0.22, 0.3, 0, top + cabinH * 0.95, cabinZ);
+    const m = add(box, sign);
+    m.scale.set(0.62, 0.2, 0.26);
+    m.position.set(0, g.top + 0.1, (g.cr1 + g.cf1) / 2);
   }
-
-  // wheels: front pair on steering pivots
   const wheels = [];
-  const wz = L / 2 - 0.85;
-  const wx = W / 2 - 0.02;
-  for (const [x, z, front] of [[wx, wz, true], [-wx, wz, true], [wx, -wz, false], [-wx, -wz, false]]) {
+  const wx = W / 2 - 0.13;
+  for (const [x, z, front] of [[wx, g.wz, true], [-wx, g.wz, true], [wx, -g.wz, false], [-wx, -g.wz, false]]) {
     const pivot = new THREE.Group();
-    pivot.position.set(x, 0.36, z);
+    pivot.position.set(x, 0.37, z);
     const spin = new THREE.Group();
-    const t = new THREE.Mesh(wheelGeo, shared.tyre);
-    t.castShadow = true;
-    const h = new THREE.Mesh(hubGeo, shared.hub);
-    spin.add(t, h);
+    add(parts.wheel, wheelMat, spin);
     pivot.add(spin);
     root.add(pivot);
     wheels.push({ pivot, spin, front });
   }
-  // simple driver silhouette, shown when someone is at the wheel
-  const driver = new THREE.Group();
-  addBox(driver, new THREE.MeshStandardMaterial({ color: '#333a44' }), 0.4, 0.36, 0.24, 0, 0, 0);
-  addBox(driver, new THREE.MeshStandardMaterial({ color: '#c08a62' }), 0.2, 0.2, 0.2, 0, 0.3, 0);
-  driver.position.set(W * 0.22, top + Math.min(0.12, cabinH * 0.8 - 0.5), cabinZ + cabinLen * 0.1);
+  const driver = add(parts.driver, driverMat);
+  driver.position.set(W * 0.22, g.b + g.deck + 0.05, (g.cr0 + g.cf0) / 2 + 0.1);
   driver.visible = false;
-  body.add(driver);
   return { root, body, wheels, paint, head, tail, sirens, driver };
 }
 
@@ -270,7 +387,6 @@ export class Vehicle {
   damage(amount) {
     if (this.dead) return;
     this.health = Math.max(0, this.health - amount * (1 - (this.armor || 0)));
-    if (this.driver === null && !this.ai) this.kind = this.kind === 'parked' ? 'abandoned' : this.kind;
   }
 
   /** Called by the world when a burning wreck goes up. */
@@ -278,7 +394,7 @@ export class Vehicle {
     this.dead = true;
     this.health = 0;
     this.mesh.traverse((o) => {
-      if (o.isMesh && o.material !== shared.tyre) o.material = shared.charred;
+      if (o.isMesh) o.material = shared.charred;
     });
     this.parts.driver.visible = false;
   }
@@ -315,7 +431,7 @@ export class Vehicle {
   remove() {
     this.scene.remove(this.mesh);
     this.mesh.traverse((o) => {
-      if (o.isMesh && o.material && !Object.values(shared).includes(o.material) && o.material.dispose) o.material.dispose();
+      if (o.isMesh && o.material && !Object.values(shared).includes(o.material) && ![wheelMat, trimMat, driverMat].includes(o.material)) o.material.dispose();
     });
   }
 }

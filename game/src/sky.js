@@ -73,6 +73,19 @@ export class Sky {
     this.dome = dome;
     scene.add(dome);
 
+    // a small copy of the sky over a sandy ground disc, captured into an environment map so
+    // car paint, glass towers and wet-looking asphalt reflect the real sky of the hour
+    this.envScene = new THREE.Scene();
+    this.envScene.add(new THREE.Mesh(new THREE.SphereGeometry(50, 32, 16), dome.material));
+    const ground = new THREE.Mesh(new THREE.CircleGeometry(48, 24), new THREE.MeshBasicMaterial({ color: '#6f6658' }));
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = -3;
+    this.envScene.add(ground);
+    this.groundMat = ground.material;
+    this.envHour = -99;
+    this.envTarget = null;
+    this.pmrem = null;
+
     this.sun = new THREE.DirectionalLight('#ffffff', 2);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
@@ -111,5 +124,18 @@ export class Sky {
     this.scene.fog.color.copy(k.horizon);
     this.dome.position.set(focus.x, 0, focus.z);
     this.night = clamp(1 - (elev + 0.05) / 0.25, 0, 1);
+    this.hemi.intensity = k.amb * 0.55;
+  }
+
+  /** Re-capture the sky into scene.environment when the hour has moved on. */
+  updateEnvironment(renderer, force = false) {
+    if (!force && Math.abs(this.hour - this.envHour) < 0.2) return;
+    this.envHour = this.hour;
+    if (!this.pmrem) this.pmrem = new THREE.PMREMGenerator(renderer);
+    this.groundMat.color.copy(this.uniforms.uHorizon.value).multiplyScalar(0.35).lerp(new THREE.Color('#6f6658'), 0.5);
+    const old = this.envTarget;
+    this.envTarget = this.pmrem.fromScene(this.envScene, 0.02, 0.1, 200);
+    this.scene.environment = this.envTarget.texture;
+    if (old) old.dispose();
   }
 }

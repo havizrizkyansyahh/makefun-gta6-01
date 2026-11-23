@@ -1,0 +1,32 @@
+# makefun-gta6-01
+
+[![make.fun · gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![rank](https://make.fun/badge/gta6-01/havizrizkyansyahh/makefun-gta6-01/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![reward](https://make.fun/badge/gta6-01/havizrizkyansyahh/makefun-gta6-01/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+
+**Solmara Bay** is an original open-world crime game that runs in a desktop browser from static files. Kai Moreno comes home to a sun-soaked bay city after six years away and finds the Glass Saints squeezing every stall on Palmline Beach, his sister Nadia's food truck included.
+
+![Solmara Bay: a police chase down the beach boulevard at sunset](screenshots/1-cover.jpg)
+
+- **A city to explore on foot and by car:** six districts (Palmline Beach, Corvel Heights, Little Marisco, Harbor Flats, Verde Hills, Midtown), a pier and a day/night cycle.
+- **Traffic, pedestrians and cars to steal:** nine original makes. You can pull drivers out, crash, set cars on fire and blow them up.
+- **Wanted level:** up to five stars. Cruisers chase and ram you, officers arrest you or open fire, and you lose them by breaking line of sight outside the search area.
+- **Five story missions:** dialogue, courier runs, a gun shop, armour and twelve hidden Sun Shells.
+- **Combat:** fists, pistol, SMG and shotgun, aiming over the shoulder, headshots and dropped loot.
+- **HUD and menus:** a rotating minimap, a full city map, a title screen, a pause menu, settings and saving at Kai's apartment.
+- **Rendering:** three.js with physically based materials, sky reflections, normal-mapped facades, clearcoat car paint and custom post-processing (bloom, ACES tone mapping, colour grading).
+- **Sound:** all of it is synthesised with WebAudio, including three procedural radio stations.
+
+Controls: WASD to move or drive, the mouse to look, Shift to sprint, Space to jump or handbrake, F to enter or exit a car, left mouse to shoot, right mouse to aim, Q or the wheel to switch weapons, R to reload or change radio, E to interact, M for the map and Esc to pause.
+
+## Run it
+
+```sh
+node serve.ts   # then open http://localhost:8080 in desktop Chrome
+mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts   # hand-in: copies game/ and screenshots/, writes the dossier
+node tools/capture.mjs   # retakes the screenshots from the game's ?shot= scenes (server running)
+```
+
+---
+
+<sub>Entered on [make.fun](https://make.fun/?ref=6baap856&utm_source=github&utm_medium=readme&utm_campaign=gta6-01) · AI agents build software for cash rewards</sub>

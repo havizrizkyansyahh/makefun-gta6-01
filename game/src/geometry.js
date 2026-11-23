@@ -81,6 +81,50 @@ export class MeshBuilder {
       [[x0 / tu, -z1 / tv], [x1 / tu, -z1 / tv], [x1 / tu, -z0 / tv], [x0 / tu, -z0 / tv]]);
   }
 
+  /**
+   * A smooth upright cylinder (round towers, water tanks), with a flat top cap. UVs wrap the
+   * circumference in metres / tile so facade windows keep their size.
+   */
+  cylinder(cx, cz, r, y0, y1, color, opts = {}) {
+    const seg = opts.segments || 24;
+    const [tu, tv] = opts.tile || [1, 1];
+    const shade = opts.shade || 1;
+    const c = { r: color.r * shade, g: color.g * shade, b: color.b * shade };
+    const arc = (2 * Math.PI * r) / seg;
+    for (let i = 0; i < seg; i += 1) {
+      const a0 = (i / seg) * Math.PI * 2;
+      const a1 = ((i + 1) / seg) * Math.PI * 2;
+      const p = (a, y) => [cx + Math.sin(a) * r, y, cz + Math.cos(a) * r];
+      const n = (a) => [Math.sin(a), 0, Math.cos(a)];
+      const base = this.vertexCount;
+      const verts = [p(a0, y0), p(a1, y0), p(a1, y1), p(a0, y1)];
+      const norms = [n(a0), n(a1), n(a1), n(a0)];
+      const u0 = (i * arc) / tu;
+      const u1 = ((i + 1) * arc) / tu;
+      const uvs = [[u0, y0 / tv], [u1, y0 / tv], [u1, y1 / tv], [u0, y1 / tv]];
+      for (let k = 0; k < 4; k += 1) {
+        this.pos.push(...verts[k]);
+        this.nor.push(...norms[k]);
+        this.col.push(c.r, c.g, c.b);
+        this.uv.push(...uvs[k]);
+      }
+      this.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    }
+    if (opts.cap !== false) {
+      const capColor = opts.capColor || color;
+      const centre = this.vertexCount;
+      this.pos.push(cx, y1, cz); this.nor.push(0, 1, 0); this.col.push(capColor.r, capColor.g, capColor.b); this.uv.push(0, 0);
+      for (let i = 0; i <= seg; i += 1) {
+        const a = (i / seg) * Math.PI * 2;
+        this.pos.push(cx + Math.sin(a) * r, y1, cz + Math.cos(a) * r);
+        this.nor.push(0, 1, 0);
+        this.col.push(capColor.r, capColor.g, capColor.b);
+        this.uv.push(0, 0);
+      }
+      for (let i = 0; i < seg; i += 1) this.idx.push(centre, centre + 1 + i, centre + 2 + i);
+    }
+  }
+
   build() {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
@@ -92,6 +136,47 @@ export class MeshBuilder {
     return g;
   }
 }
+
+/**
+ * Merge (geometry, matrix[, colour]) parts into one non-indexed BufferGeometry. With colours,
+ * a vertex colour attribute is written too, so differently coloured parts share one material.
+ */
+export function mergeParts(parts, withColor = true) {
+  const pos = [];
+  const nor = [];
+  const colr = [];
+  const v = new THREE.Vector3();
+  const n = new THREE.Vector3();
+  const nm = new THREE.Matrix3();
+  const c = new THREE.Color();
+  for (const { geo, color, matrix } of parts) {
+    const g = geo.index ? geo.toNonIndexed() : geo;
+    const P = g.attributes.position;
+    const Nn = g.attributes.normal;
+    nm.getNormalMatrix(matrix);
+    c.set(color || '#ffffff');
+    for (let i = 0; i < P.count; i += 1) {
+      v.fromBufferAttribute(P, i).applyMatrix4(matrix);
+      n.fromBufferAttribute(Nn, i).applyMatrix3(nm).normalize();
+      pos.push(v.x, v.y, v.z);
+      nor.push(n.x, n.y, n.z);
+      if (withColor) colr.push(c.r, c.g, c.b);
+    }
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  out.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  if (withColor) out.setAttribute('color', new THREE.Float32BufferAttribute(colr, 3));
+  out.computeBoundingSphere();
+  return out;
+}
+
+/** A transform matrix from position, scale and Euler rotation. */
+export const mat4 = (x = 0, y = 0, z = 0, sx = 1, sy = 1, sz = 1, rx = 0, ry = 0, rz = 0) => new THREE.Matrix4().compose(
+  new THREE.Vector3(x, y, z),
+  new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz)),
+  new THREE.Vector3(sx, sy, sz),
+);
 
 /** Shorthand for a THREE.Color from a hex string or number. */
 export const col = (hex) => new THREE.Color(hex);
