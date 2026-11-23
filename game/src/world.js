@@ -4,6 +4,7 @@
 // camera. It also handles being wasted or busted, respawning, and the save file.
 import * as THREE from '../vendor/three.module.min.js';
 import { City, PIER } from './city.js';
+import { Signals } from './signals.js';
 import { Sky } from './sky.js';
 import { Effects } from './effects.js';
 import { Player } from './player.js';
@@ -11,7 +12,7 @@ import { Traffic } from './traffic.js';
 import { Police } from './police.js';
 import { Missions } from './missions.js';
 import { CameraRig } from './camera.js';
-import { collideVehicles } from './vehicles.js';
+import { collideVehicles, Vehicle } from './vehicles.js';
 import { Pickup } from './markers.js';
 import { STATIONS } from './audio.js';
 import { CITY, DAY_SECONDS, START_HOUR, SAVE_KEY, PLAYER } from './config.js';
@@ -29,6 +30,7 @@ export class World {
     this.density = 1;
     this.difficulty = 1;
     this.city = new City(this.scene, seed);
+    this.signals = new Signals(this.scene, this.city);
     this.sky = new Sky(this.scene);
     this.fx = new Effects(this.scene);
     this.vehicles = [];
@@ -70,6 +72,10 @@ export class World {
     // a starter car parked on the boulevard by the truck
     const n = this.city.places.nadia;
     const seg = { a: this.city.nearestNode(n.x - 40, n.z - 20), b: this.city.nearestNode(n.x + 50, n.z - 20), t: 0.5 };
+    // a bike on the sand by the truck, for anyone who prefers two wheels
+    const bike = new Vehicle(this.scene, 'sprint', '#ffb703', n.x + 9, n.z - 4, Math.PI / 2);
+    bike.kind = 'parked';
+    this.vehicles.push(bike);
     if (seg.a !== seg.b) {
       const v = this.traffic.spawnCar(seg, 'ardent');
       if (v) { v.ai = null; v.driver = null; v.kind = 'parked'; v.vel.x = v.vel.z = 0; }
@@ -211,6 +217,7 @@ export class World {
       if (this.downTimer <= 0) this.respawn();
     }
     p.update(dt, input, this.rig);
+    this.signals.update(dt);
 
     // vehicles: AI, physics, collisions
     this.events.length = 0;
@@ -236,6 +243,7 @@ export class World {
 
     const at = this.where();
     this.sky.update(this.hour, at);
+    this.city.syncSky(this.sky.uniforms);
     this.city.update(this.time, this.sky.night);
     this.rig.update(dt, this, input);
     this.sounds();
@@ -258,6 +266,7 @@ export class World {
         if (e.vehicle === p.vehicle) {
           this.fx.shake = Math.max(this.fx.shake, Math.min(1, e.impact / 20));
           this.stats.crashes += 1;
+          if (p.vehicle.spec.body === 'bike' && e.impact > 11) this.throwRider(e.impact);
           if (e.impact > 18) this.hurtPlayer((e.impact - 18) * 1.5, null);
         }
         this.fx.spawn('spark', e.vehicle.pos.x + e.vehicle.fx * e.vehicle.halfLen, 0.6, e.vehicle.pos.z + e.vehicle.fz * e.vehicle.halfLen, 6);
@@ -268,6 +277,7 @@ export class World {
         const mine = e.a === p.vehicle || e.b === p.vehicle;
         if (mine) {
           this.fx.shake = Math.max(this.fx.shake, Math.min(1, e.impact / 18));
+          if (p.vehicle.spec.body === 'bike' && e.impact > 9) { this.throwRider(e.impact); continue; }
           const other = e.a === p.vehicle ? e.b : e.a;
           // only the player's own ramming is a crime, not being rammed by a cruiser
           const mineSpeed = p.vehicle.speed;
@@ -276,6 +286,22 @@ export class World {
         }
       }
     }
+  }
+
+  /** Off the bike and onto the tarmac after a hard hit. */
+  throwRider(impact) {
+    const p = this.player;
+    const v = p.vehicle;
+    if (!v) return;
+    const vx = v.vel.x;
+    const vz = v.vel.z;
+    p.exitVehicle();
+    p.vel.x = vx * 0.5;
+    p.vel.z = vz * 0.5;
+    p.vy = 4;
+    p.grounded = false;
+    this.hurtPlayer(Math.min(60, impact * 1.6), null);
+    this.hud.notify('Thrown off the bike!');
   }
 
   /** Moving cars knock people down. */
@@ -447,6 +473,8 @@ export class World {
       siren = Math.max(siren, 1 / (1 + (d * d) / 2500));
     }
     a.siren(siren);
+    const h = this.police.heli;
+    a.rotor(h && !h.dead ? 1 / (1 + ((h.pos.x - at.x) ** 2 + (h.pos.z - at.z) ** 2 + h.pos.y ** 2) / 2500) : 0);
   }
 
   // ------------------------------------------------------------ saving

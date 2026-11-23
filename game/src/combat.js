@@ -86,6 +86,11 @@ export function traceShot(world, shooter, ox, oy, oz, dx, dy, dz, range) {
     const t = rayVehicle(ox, oy, oz, dx, dy, dz, v);
     if (t >= 0 && t < best) { best = t; kind = 'vehicle'; ref = v; }
   }
+  const heli = world.police && world.police.heli;
+  if (heli && heli.alive) {
+    const t = rayCylinder(ox, oy, oz, dx, dy, dz, heli.pos.x, heli.pos.z, heli.pos.y - 1.6, heli.pos.y + 1.6, 1.8);
+    if (t >= 0 && t < best) { best = t; kind = 'heli'; ref = heli; }
+  }
   return { t: best, kind, ref };
 }
 

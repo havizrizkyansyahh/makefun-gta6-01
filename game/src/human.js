@@ -223,6 +223,17 @@ export class Human {
       this.body.position.y = -0.38;
       return;
     }
+    if (state === 'ride') {
+      // astride a motorbike: knees up, leaning over the tank, hands on the bars
+      L.hip.rotation.set(-1.25, 0, 0.18); R.hip.rotation.set(-1.25, 0, -0.18);
+      L.knee.rotation.x = R.knee.rotation.x = 1.55;
+      this.chest.rotation.x = 0.42;
+      L.shoulder.rotation.set(-1.05, 0, -0.12); R.shoulder.rotation.set(-1.05, 0, 0.12);
+      L.elbow.rotation.x = R.elbow.rotation.x = -0.35;
+      this.neck.rotation.x = -0.35;
+      this.body.position.y = -0.47;
+      return;
+    }
     if (state === 'hands') {
       L.shoulder.rotation.z = 2.7; R.shoulder.rotation.z = -2.7;
       L.elbow.rotation.z = 0.5; R.elbow.rotation.z = -0.5;

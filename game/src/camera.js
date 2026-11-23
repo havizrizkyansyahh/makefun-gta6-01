@@ -18,9 +18,17 @@ export class CameraRig {
     this.sensitivity = CAMERA.sensitivity;
     this.invertY = false;
     this.pivot = new THREE.Vector3();
+    this.assistTarget = null;
+    this.assistT = 0;
   }
 
   kick(a) { this.recoil += a; }
+
+  /** Ease the crosshair onto a target's chest for a moment (aim assist). */
+  assist(target) {
+    this.assistTarget = target;
+    this.assistT = 0.22;
+  }
 
   /** Snap behind a heading (after respawn, entering a car). */
   snap(heading, pitch = 0.18) {
@@ -39,6 +47,18 @@ export class CameraRig {
     else this.idle += dt;
     this.pitch -= this.recoil;
     this.recoil = damp(this.recoil, 0, 18, dt);
+    if (this.assistT > 0 && this.assistTarget && !this.assistTarget.dead) {
+      this.assistT -= dt;
+      const t = this.assistTarget;
+      const c = this.camera.position;
+      const dx = t.pos.x - c.x;
+      const dy = t.y + 1.3 - c.y;
+      const dz = t.pos.z - c.z;
+      const yaw = Math.atan2(dx, dz);
+      const pitch = -Math.atan2(dy, Math.hypot(dx, dz));
+      this.yaw += wrapAngle(yaw - this.yaw) * Math.min(1, dt * 16);
+      this.pitch += (pitch - this.pitch) * Math.min(1, dt * 16);
+    }
 
     let wantDist;
     let wantFov = CAMERA.fov;
@@ -69,8 +89,12 @@ export class CameraRig {
     this.dist = damp(this.dist, wantDist, 7, dt);
     this.fov = damp(this.fov, wantFov, 6, dt);
 
-    const cp = Math.cos(this.pitch);
-    this.dir.set(Math.sin(this.yaw) * cp, -Math.sin(this.pitch), Math.cos(this.yaw) * cp);
+    // hold C in a car to look out of the back window
+    const back = v && input.down('KeyC');
+    const viewYaw = back ? v.heading + Math.PI : this.yaw;
+    const viewPitch = back ? 0.15 : this.pitch;
+    const cp = Math.cos(viewPitch);
+    this.dir.set(Math.sin(viewYaw) * cp, -Math.sin(viewPitch), Math.cos(viewYaw) * cp);
     // pull in when a building is between the pivot and the camera
     let d = this.dist;
     const hit = world.city.rayCast(this.pivot.x, this.pivot.y, this.pivot.z, -this.dir.x, -this.dir.y, -this.dir.z, d + 0.4);

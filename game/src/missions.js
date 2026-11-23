@@ -271,7 +271,8 @@ export class Missions {
   /** Called when the player is wasted or busted. */
   onPlayerDown() {
     if (this.active) this.fail('You can retry from the contact.');
-    if (this.side) this.endSide(false, 'Courier run failed.');
+    if (this.side && this.side.kind === 'taxi') this.dropPassenger(null);
+    if (this.side) this.endSide(false, this.side.kind === 'taxi' ? 'Taxi shift over.' : 'Courier run failed.');
   }
 
   clearContact() {
@@ -317,6 +318,113 @@ export class Missions {
     s.pay = Math.round(150 + d * 0.9);
     s.run += 1;
     w.hud.notify(`Parcel ${s.run}/3: deliver it to the blue marker.`);
+  }
+
+  // ------------------------------------------------------------ taxi fares (in any Marlin Cab)
+  startTaxi() {
+    this.side = { kind: 'taxi', stage: 'pickup', marker: null, time: 0, fares: 0, earned: 0, wait: 0, justStarted: true };
+    this.world.hud.bigText('TAXI', 'Pick up fares in your Marlin Cab. Press T to clock off.', 3, '#ffd23f');
+    this.nextFare();
+  }
+
+  /** A point on a sidewalk between lo and hi metres from the player. */
+  kerbPoint(lo, hi) {
+    const w = this.world;
+    const c = w.player.where();
+    let best = null;
+    for (let k = 0; k < 60; k += 1) {
+      const loop = w.rng.pick(w.city.loops);
+      const x = w.rng.chance(0.5) ? loop.x0 : loop.x1;
+      const z = w.rng.range(loop.z0 + 6, loop.z1 - 6);
+      const d = Math.hypot(x - c.x, z - c.z);
+      best = { x, z, d };
+      if (d > lo && d < hi) break;
+    }
+    return best;
+  }
+
+  /** Let a passenger step out beside the cab and go about their day. */
+  dropPassenger(v) {
+    const n = this.side && this.side.fareNpc;
+    if (!n) return;
+    n.inVehicle = null;
+    n.persistent = false;
+    if (v) {
+      n.pos.x = v.pos.x + Math.cos(v.heading) * 2;
+      n.pos.z = v.pos.z - Math.sin(v.heading) * 2;
+    }
+    n.state = 'idle';
+    n.timer = 1.5;
+    n.loop = null;
+    n.sync();
+    this.side.fareNpc = null;
+  }
+
+  nextFare() {
+    const w = this.world;
+    const s = this.side;
+    if (s.marker) s.marker.remove();
+    const pt = this.kerbPoint(70, 220);
+    s.stage = 'pickup';
+    s.marker = new Marker(w.scene, pt.x, pt.z, '#ffd23f', 3, w.city.groundHeight(pt.x, pt.z));
+    s.fareNpc = new Npc(w, 'civ', pt.x, pt.z, { state: 'stand', persistent: true });
+    w.npcs.push(s.fareNpc);
+    s.time = Math.round(pt.d / 9 + 30);
+    w.hud.notify('A fare is waiting at the yellow marker.');
+  }
+
+  updateTaxi(dt, input, at) {
+    const w = this.world;
+    const s = this.side;
+    const v = w.player.vehicle;
+    // the key press that started the shift must not also end it
+    const quit = input.hit('KeyT') && !s.justStarted;
+    s.justStarted = false;
+    if (!v || !v.spec.taxi || quit) {
+      const msg = `Shift over: ${s.fares} fares, $${s.earned}.`;
+      this.dropPassenger(v);
+      this.endSide(true, msg);
+      w.hud.notify(msg);
+      this.timer = null;
+      return;
+    }
+    s.marker.update(dt);
+    s.time -= dt;
+    this.timer = s.time;
+    if (s.time <= 0) {
+      w.hud.notify(s.stage === 'drop' ? 'Too slow: the passenger got out without paying.' : 'The fare found another cab.');
+      this.dropPassenger(v);
+      this.nextFare();
+      return;
+    }
+    const stopped = v.speed < 2.5 && s.marker.inside(at.x, at.z, 1.5);
+    if (s.stage === 'pickup' && stopped) {
+      s.wait += dt;
+      if (s.wait > 0.8) {
+        s.wait = 0;
+        s.fareNpc.inVehicle = v;
+        s.fareNpc.sync();
+        s.marker.remove();
+        const pt = this.kerbPoint(180, 480);
+        s.marker = new Marker(w.scene, pt.x, pt.z, '#ffd23f', 3, w.city.groundHeight(pt.x, pt.z));
+        s.stage = 'drop';
+        s.dist = pt.d;
+        s.time = Math.round(pt.d / 10 + 25);
+        s.limit = s.time;
+        w.audio.ui('select');
+        w.hud.notify(`"${w.rng.pick(['To the beach, and step on it!', 'Corvel Heights, please.', 'Follow the coast, I am late!', 'Just drive, I will tell you where.'])}"`);
+      }
+    } else if (s.stage === 'drop' && stopped) {
+      const pay = Math.round(60 + s.dist * 0.55 + Math.max(0, s.time / s.limit) * 120);
+      w.money += pay;
+      s.fares += 1;
+      s.earned += pay;
+      w.audio.ui('cash');
+      w.hud.notify(`Fare paid: $${pay}${s.time / s.limit > 0.4 ? ' (with a tip)' : ''}`);
+      this.dropPassenger(v);
+      w.stats.deliveries += 1;
+      this.nextFare();
+    }
   }
 
   endSide(ok, msg) {
@@ -420,7 +528,15 @@ export class Missions {
       }
     }
 
-    if (this.side) {
+    // in a cab with nothing else going on: offer taxi work
+    if (!this.side && !this.active && p.vehicle && p.vehicle.spec.taxi && !p.dead) {
+      w.hud.help('Press T to start taking taxi fares.');
+      if (input.hit('KeyT')) this.startTaxi();
+    }
+
+    if (this.side && this.side.kind === 'taxi') {
+      this.updateTaxi(dt, input, at);
+    } else if (this.side) {
       const s = this.side;
       s.marker.update(dt);
       s.time -= dt;
@@ -450,7 +566,7 @@ export class Missions {
       for (const a of c.arrows) if (!a.entity.dead || a.entity.spec) out.push({ x: a.entity.pos.x, z: a.entity.pos.z, color: '#ff4d4d', kind: 'target', edge: true });
       for (const p of c.pickups) if (!p.taken) out.push({ x: p.x, z: p.z, color: '#6dff8a', kind: 'objective', edge: true });
     }
-    if (this.side && this.side.marker) out.push({ x: this.side.marker.x, z: this.side.marker.z, color: '#4fc3f7', kind: 'objective', edge: true });
+    if (this.side && this.side.marker) out.push({ x: this.side.marker.x, z: this.side.marker.z, color: this.side.kind === 'taxi' ? '#ffd23f' : '#4fc3f7', kind: 'objective', edge: true });
     return out;
   }
 
@@ -458,6 +574,9 @@ export class Missions {
     if (this.active) {
       const step = this.active.def.steps[this.active.step];
       return { title: this.active.def.title, text: this.counter || (step ? step.text : '') };
+    }
+    if (this.side && this.side.kind === 'taxi') {
+      return { title: `Taxi  ·  ${this.side.fares} fares  ·  $${this.side.earned}`, text: this.side.stage === 'pickup' ? 'Pick up the passenger at the yellow marker.' : 'Drive the passenger to the yellow marker.' };
     }
     if (this.side) return { title: 'Courier Run', text: `Deliver parcel ${this.side.run}/3 to the blue marker.` };
     const next = this.next();

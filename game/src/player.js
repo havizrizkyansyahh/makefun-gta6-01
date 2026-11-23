@@ -120,6 +120,7 @@ export class Player {
     let mz = fz * iz + fx * ix;
     const ml = Math.hypot(mx, mz);
     this.aiming = input.mouse(2) && this.current !== 'fist';
+    if (input.mouseHit(2) && this.current !== 'fist') this.lockOn(cam);
     const run = input.down('ShiftLeft') || input.down('ShiftRight');
     const speed = ml > 0 ? (this.aiming ? PLAYER.walk * 0.7 : run ? PLAYER.run : PLAYER.walk) : 0;
     if (ml > 0) { mx /= ml; mz /= ml; }
@@ -234,6 +235,8 @@ export class Player {
         w.fx.spawn('spark', hx, hy, hz, 4);
         if (r.ref.kind === 'police') w.police.report('copHit', this.pos.x, this.pos.z);
         if (r.ref.ai && r.ref.ai.mode === 'traffic') r.ref.ai.panic = 8;
+      } else if (r.kind === 'heli') {
+        r.ref.damage(spec.dmg * 0.5);
       } else if (r.kind === 'wall') {
         w.fx.spawn('dust', hx, hy, hz, 2);
         w.fx.spawn('spark', hx, hy, hz, 2);
@@ -244,6 +247,27 @@ export class Player {
     cam.kick(pellets > 1 ? 0.05 : 0.018);
     w.audio.shot(spec.sound, 0);
     w.gunfire(this.pos.x, this.pos.z);
+  }
+
+  /** Aim assist: the nearest armed enemy (or anyone, failing that) close to the crosshair. */
+  lockOn(cam) {
+    const w = this.world;
+    let best = null;
+    let score = Infinity;
+    for (const n of w.npcs) {
+      if (n.dead || n.inVehicle || n.invulnerable) continue;
+      const dx = n.pos.x - this.pos.x;
+      const dz = n.pos.z - this.pos.z;
+      const d = Math.hypot(dx, dz);
+      if (d > 45 || d < 1) continue;
+      const off = Math.abs(Math.atan2(Math.sin(Math.atan2(dx, dz) - cam.yaw), Math.cos(Math.atan2(dx, dz) - cam.yaw)));
+      if (off > 0.32) continue;
+      if (!w.city.lineOfSight(this.pos.x, this.y + 1.5, this.pos.z, n.pos.x, n.y + 1.3, n.pos.z)) continue;
+      const hostile = n.role === 'saint' || (n.role === 'cop' && w.police.stars > 0);
+      const s = off * 40 + d * 0.3 - (hostile ? 30 : 0);
+      if (s < score) { score = s; best = n; }
+    }
+    if (best) cam.assist(best);
   }
 
   punch() {
@@ -303,7 +327,7 @@ export class Player {
     v.input.throttle = 0;
     v.input.handbrake = false;
     this.vehicle = v;
-    this.human.root.visible = false;
+    this.human.root.visible = v.spec.body === 'bike';
     this.aiming = false;
     w.onEnterVehicle(v);
   }
@@ -348,6 +372,13 @@ export class Player {
     this.y = v.y;
     this.heading = v.heading;
     this.moveSpeed = v.speed;
+    if (v.spec.body === 'bike') {
+      // ride it: sit on the seat and lean with the bike
+      this.human.animate(dt, 0, 'ride');
+      this.human.root.position.set(v.pos.x - Math.sin(v.heading) * 0.2, v.y + 0.42, v.pos.z - Math.cos(v.heading) * 0.2);
+      this.human.root.rotation.set(0, v.heading, 0);
+      this.human.root.rotateZ(v.lean || 0);
+    }
     if (v.dead) this.exitVehicle();
   }
 

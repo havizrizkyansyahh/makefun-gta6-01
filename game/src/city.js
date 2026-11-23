@@ -4,7 +4,7 @@
 // pedestrians walk, the named districts and places the story uses, and the minimap picture.
 import * as THREE from '../vendor/three.module.min.js';
 import { CITY } from './config.js';
-import { MeshBuilder, col } from './geometry.js';
+import { MeshBuilder, col, mergeParts, mat4 } from './geometry.js';
 import { makeRng, clamp } from './rng.js';
 import {
   facadeTextures, sidewalkTexture, asphaltTexture, grassTexture, sandTexture, sidewalkNormal, asphaltNormal,
@@ -76,6 +76,7 @@ export class City {
     this.buildBlocks();
     this.buildBeach();
     this.buildProps();
+    this.buildGreenery();
     this.buildHills();
     this.buildMinimap();
   }
@@ -280,7 +281,7 @@ export class City {
     asphaltN.repeat.copy(asphalt.repeat);
     const road = new THREE.Mesh(
       new THREE.PlaneGeometry(extent * 2, extent * 2),
-      new THREE.MeshStandardMaterial({ map: asphalt, normalMap: asphaltN, normalScale: new THREE.Vector2(0.6, 0.6), color: '#d8d2ca', roughness: 0.86, metalness: 0, envMapIntensity: 0.22 }),
+      new THREE.MeshStandardMaterial({ map: asphalt, normalMap: asphaltN, normalScale: new THREE.Vector2(0.6, 0.6), color: '#ffffff', roughness: 0.84, metalness: 0, envMapIntensity: 0.3 }),
     );
     road.rotation.x = -Math.PI / 2;
     road.receiveShadow = true;
@@ -578,7 +579,7 @@ export class City {
         emissiveMap: tex[kind].night,
         emissiveIntensity: 0,
       });
-      mat.userData.nightScale = kind === 'shop' ? 0.32 : 0.9;
+      mat.userData.nightScale = kind === 'shop' ? 0.16 : 0.9;
       this.nightMaterials.push(mat);
       const mesh = new THREE.Mesh(walls[kind].build(), mat);
       mesh.castShadow = true;
@@ -729,6 +730,143 @@ export class City {
     }
   }
 
+  /**
+   * Street life that makes the blocks feel lived in: leafy shade trees along the avenues and in
+   * the parks and gardens, benches, bins and hydrants, and pools of warm lamplight on the
+   * pavement after dark.
+   */
+  buildGreenery() {
+    const rng = makeRng(321);
+    const trees = [];
+    const benches = [];
+    const bins = [];
+    const hydrants = [];
+    const nearCorner = (v, lo, hi) => v - lo < 9 || hi - v < 9;
+    for (const loop of this.loops) {
+      const kind = SPECIAL[`${loop.bx},${loop.bz}`];
+      const dist = districtOf(loop.bx, loop.bz);
+      const x0 = blockMin(loop.bx);
+      const x1 = blockMax(loop.bx);
+      const z0 = blockMin(loop.bz);
+      const z1 = blockMax(loop.bz);
+      // shade trees one metre in from the kerb, skipping the beach row, harbour and corners
+      if (dist !== 'harbor' && dist !== 'palmline' && kind !== 'parking') {
+        for (let t = x0 + 14; t < x1 - 10; t += 17) {
+          if (!nearCorner(t, x0, x1)) { trees.push({ x: t, z: z0 + 1.1, s: rng.range(0.85, 1.15) }); trees.push({ x: t + 6, z: z1 - 1.1, s: rng.range(0.85, 1.15) }); }
+        }
+        for (let t = z0 + 14; t < z1 - 10; t += 17) {
+          if (!nearCorner(t, z0, z1)) { trees.push({ x: x0 + 1.1, z: t, s: rng.range(0.85, 1.15) }); trees.push({ x: x1 - 1.1, z: t + 6, s: rng.range(0.85, 1.15) }); }
+        }
+      }
+      if (kind === 'park') {
+        for (let k = 0; k < 10; k += 1) trees.push({ x: rng.range(x0 + 9, x1 - 9), z: rng.range(z0 + 9, z1 - 9), s: rng.range(1.1, 1.6) });
+        for (let k = 0; k < 6; k += 1) benches.push({ x: rng.range(x0 + 10, x1 - 10), z: z0 + CITY.walk + 1.2, r: 0 });
+      }
+      if (kind === 'plaza') {
+        const cx = blockCentre(loop.bx);
+        const cz = blockCentre(loop.bz);
+        for (const [ox, oz, r] of [[0, 10, 0], [0, -10, Math.PI], [10, 0, Math.PI / 2], [-10, 0, -Math.PI / 2]]) benches.push({ x: cx + ox, z: cz + oz, r });
+      }
+      if (dist === 'verde' && kind !== 'parking') {
+        for (let k = 0; k < 5; k += 1) trees.push({ x: rng.range(x0 + 7, x1 - 7), z: rng.range(z0 + 7, z1 - 7), s: rng.range(0.9, 1.3), soft: true });
+      }
+      // a bin and a hydrant near two corners of most blocks
+      if (rng.chance(0.8)) bins.push({ x: x0 + 1.0, z: z0 + 6 });
+      if (rng.chance(0.8)) bins.push({ x: x1 - 1.0, z: z1 - 6 });
+      if (rng.chance(0.7)) hydrants.push({ x: x1 - 0.9, z: z0 + 11 });
+    }
+    // benches along the beach promenade, facing the sea
+    for (let x = -roadLine(N) + 20; x < roadLine(N); x += 32) benches.push({ x, z: roadLine(N) + RH + 7, r: 0 });
+
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const e = new THREE.Euler();
+    const v = new THREE.Vector3();
+    const sc = new THREE.Vector3();
+    const height = (x, z) => this.groundHeight(x, z);
+
+    // trees: a tapered trunk and a crown of overlapping smooth lobes, tinted per tree
+    const trunkGeo = new THREE.CylinderGeometry(0.14, 0.24, 3.2, 8);
+    trunkGeo.translate(0, 1.6, 0);
+    const lobes = [];
+    const lobe = new THREE.IcosahedronGeometry(1, 2);
+    for (const [x, y, z, r] of [[0, 4.6, 0, 1.9], [1.1, 4.1, 0.4, 1.4], [-1.0, 4.2, -0.5, 1.5], [0.2, 5.5, -0.6, 1.3], [-0.4, 4.0, 1.0, 1.3]]) {
+      lobes.push({ geo: lobe, matrix: mat4(x, y, z, r, r * 0.9, r) });
+    }
+    const crownGeo = mergeParts(lobes, false);
+    const trunks = new THREE.InstancedMesh(trunkGeo, new THREE.MeshStandardMaterial({ color: '#6b4f3a', roughness: 1 }), trees.length);
+    const crowns = new THREE.InstancedMesh(crownGeo, new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.85, envMapIntensity: 0.4 }), trees.length);
+    const greens = ['#4f8a3a', '#5f9a3f', '#3f7a3a', '#6aa04a', '#7a9a3a'];
+    trees.forEach((t, i) => {
+      e.set(0, rng.range(0, 6.28), 0);
+      q.setFromEuler(e);
+      m.compose(v.set(t.x, height(t.x, t.z), t.z), q, sc.set(t.s, t.s, t.s));
+      trunks.setMatrixAt(i, m);
+      crowns.setMatrixAt(i, m);
+      crowns.setColorAt(i, new THREE.Color(rng.pick(greens)).multiplyScalar(rng.range(0.85, 1.1)));
+      this.addCollider(t.x - 0.25, t.x + 0.25, t.z - 0.25, t.z + 0.25, 3, 'tree');
+    });
+    trunks.castShadow = crowns.castShadow = true;
+    crowns.receiveShadow = true;
+    this.group.add(trunks, crowns);
+
+    // benches: seat, back and legs merged into one shape
+    const benchGeo = mergeParts([
+      { geo: new THREE.BoxGeometry(1.8, 0.08, 0.5), color: '#9a6a44', matrix: mat4(0, 0.45, 0) },
+      { geo: new THREE.BoxGeometry(1.8, 0.4, 0.07), color: '#9a6a44', matrix: mat4(0, 0.75, -0.24, 1, 1, 1, -0.15) },
+      { geo: new THREE.BoxGeometry(0.08, 0.45, 0.45), color: '#2f3338', matrix: mat4(-0.8, 0.22, 0) },
+      { geo: new THREE.BoxGeometry(0.08, 0.45, 0.45), color: '#2f3338', matrix: mat4(0.8, 0.22, 0) },
+    ], true);
+    const binGeo = mergeParts([
+      { geo: new THREE.CylinderGeometry(0.3, 0.26, 0.9, 12), color: '#2e5e4e', matrix: mat4(0, 0.45, 0) },
+      { geo: new THREE.CylinderGeometry(0.32, 0.32, 0.06, 12), color: '#1f3f34', matrix: mat4(0, 0.92, 0) },
+    ], true);
+    const hydrantGeo = mergeParts([
+      { geo: new THREE.CylinderGeometry(0.14, 0.17, 0.6, 10), color: '#c8352b', matrix: mat4(0, 0.3, 0) },
+      { geo: new THREE.SphereGeometry(0.15, 10, 6), color: '#c8352b', matrix: mat4(0, 0.62, 0) },
+      { geo: new THREE.CylinderGeometry(0.06, 0.06, 0.4, 8), color: '#d8d2c6', matrix: mat4(0, 0.4, 0, 1, 1, 1, 0, 0, Math.PI / 2) },
+    ], true);
+    const propMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.2 });
+    const place = (geo, list, collide) => {
+      const inst = new THREE.InstancedMesh(geo, propMat, list.length);
+      list.forEach((p, i) => {
+        e.set(0, p.r || 0, 0);
+        q.setFromEuler(e);
+        m.compose(v.set(p.x, height(p.x, p.z), p.z), q, sc.set(1, 1, 1));
+        inst.setMatrixAt(i, m);
+        if (collide) this.addCollider(p.x - collide, p.x + collide, p.z - collide, p.z + collide, 1, 'prop');
+      });
+      inst.castShadow = true;
+      this.group.add(inst);
+    };
+    place(benchGeo, benches, 0);
+    place(binGeo, bins, 0.3);
+    place(hydrantGeo, hydrants, 0.18);
+
+    // warm pools of lamplight on the pavement, faded in as night falls
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const g = c.getContext('2d');
+    const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+    grad.addColorStop(0, 'rgba(255,214,150,0.9)');
+    grad.addColorStop(0.5, 'rgba(255,190,120,0.35)');
+    grad.addColorStop(1, 'rgba(255,170,100,0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 128, 128);
+    const poolTex = new THREE.CanvasTexture(c);
+    poolTex.colorSpace = THREE.SRGBColorSpace;
+    this.poolMaterial = new THREE.MeshBasicMaterial({ map: poolTex, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending });
+    const poolGeo = new THREE.PlaneGeometry(13, 13);
+    poolGeo.rotateX(-Math.PI / 2);
+    const pools = new THREE.InstancedMesh(poolGeo, this.poolMaterial, this.lamps.length);
+    this.lamps.forEach((l, i) => {
+      m.makeTranslation(l.x, CITY.curb + 0.04, l.z);
+      pools.setMatrixAt(i, m);
+    });
+    pools.renderOrder = 2;
+    this.group.add(pools);
+  }
+
   buildHills() {
     const rng = makeRng(99);
     const group = new THREE.Group();
@@ -796,9 +934,19 @@ export class City {
   }
 
   /** Night factor 0..1 lights up windows and lamps; time animates the sea. */
+  /** Let the sea reflect the sky of the hour. */
+  syncSky(u) {
+    const w = this.water.material.uniforms;
+    w.uSkyH.value.copy(u.uHorizon.value);
+    w.uSkyZ.value.copy(u.uZenith.value);
+    w.uSunDir.value.copy(u.uSunDir.value);
+    w.uSun.value.copy(u.uSunColor.value);
+  }
+
   update(time, night) {
     for (const m of this.nightMaterials) m.emissiveIntensity = night * m.userData.nightScale;
     this.lampMaterial.emissiveIntensity = night * 2.2;
+    this.poolMaterial.opacity = night * 0.55;
     this.water.material.uniforms.uTime.value = time;
   }
 }
@@ -879,7 +1027,10 @@ function makeSign(text, color) {
 function makeWater() {
   const uniforms = THREE.UniformsUtils.merge([
     THREE.UniformsLib.fog,
-    { uTime: { value: 0 }, uDeep: { value: new THREE.Color('#0d6f9a') }, uShallow: { value: new THREE.Color('#38c6c9') }, uSun: { value: new THREE.Color('#fff2c4') } },
+    {
+      uTime: { value: 0 }, uDeep: { value: new THREE.Color('#0a5f8a') }, uShallow: { value: new THREE.Color('#38c6c9') }, uSun: { value: new THREE.Color('#fff2c4') },
+      uSkyH: { value: new THREE.Color('#ffd9a6') }, uSkyZ: { value: new THREE.Color('#4a86d0') }, uSunDir: { value: new THREE.Vector3(0, 1, 0) },
+    },
   ]);
   const mat = new THREE.ShaderMaterial({
     uniforms,
@@ -911,8 +1062,18 @@ function makeWater() {
       void main() {
         float shore = smoothstep(${(COAST_Z + 60).toFixed(1)}, ${(COAST_Z - 4).toFixed(1)}, vWorld.z);
         vec3 c = mix(uDeep, uShallow, shore * 0.85 + vWave * 0.4);
-        float s = sin(vWorld.x * 0.9 + uTime * 2.0) * sin(vWorld.z * 0.7 - uTime * 1.7);
-        c += uSun * pow(max(s, 0.0), 18.0) * 0.6;
+        // ripple normal from two travelling wave trains
+        vec3 n = normalize(vec3(
+          cos(vWorld.x * 0.9 + uTime * 2.0) * 0.08 + cos(vWorld.x * 0.08 + uTime * 1.3) * 0.05,
+          1.0,
+          cos(vWorld.z * 0.7 - uTime * 1.7) * 0.08 + cos(vWorld.z * 0.11 - uTime * 0.9) * 0.05));
+        vec3 v = normalize(cameraPosition - vWorld);
+        float fres = pow(1.0 - max(dot(n, v), 0.0), 4.0);
+        vec3 r = reflect(-v, n);
+        vec3 sky = mix(uSkyH, uSkyZ, pow(clamp(r.y, 0.0, 1.0), 0.5));
+        c = mix(c, sky, clamp(fres * 0.85 + 0.08, 0.0, 0.9));
+        float glint = pow(max(dot(r, normalize(uSunDir)), 0.0), 220.0);
+        c += uSun * glint * 2.5;
         float foam = smoothstep(${(COAST_Z + 3).toFixed(1)}, ${(COAST_Z - 1).toFixed(1)}, vWorld.z + sin(vWorld.x * 0.2 + uTime) * 1.2);
         c = mix(c, vec3(0.96, 0.98, 1.0), foam * 0.8);
         gl_FragColor = vec4(c, 1.0);

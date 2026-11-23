@@ -30,6 +30,8 @@ const CONTROLS = [
   ['R', 'Reload / next radio station'],
   ['E', 'Interact (save, shops, jobs)'],
   ['H', 'Horn'],
+  ['C (driving)', 'Look behind'],
+  ['T (in a Marlin Cab)', 'Start / stop taxi fares'],
   ['M', 'City map'],
   ['Backspace', 'Skip a line of dialogue'],
   ['Esc', 'Pause'],

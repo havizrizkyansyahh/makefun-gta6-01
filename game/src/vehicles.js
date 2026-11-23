@@ -15,6 +15,7 @@ export const MODELS = {
   halden: { name: 'Halden Ranger', body: 'pickup', len: 5.2, wid: 2.05, hgt: 1.7, power: 12, top: 42, grip: 6.0, turn: 1.8, mass: 1.6, colors: ['#bc4749', '#386641', '#6a994e', '#264653', '#f2e8cf'] },
   bayrunner: { name: 'Bayrunner 70', body: 'muscle', len: 4.9, wid: 2.0, hgt: 1.25, power: 16, top: 52, grip: 6.2, turn: 2.0, mass: 1.35, colors: ['#fb8500', '#219ebc', '#8338ec', '#000000'] },
   cruiser: { name: 'SBPD Interceptor', body: 'sedan', len: 4.9, wid: 1.95, hgt: 1.42, power: 16, top: 54, grip: 7.2, turn: 2.1, mass: 1.35, colors: ['#f4f4f4'], police: true },
+  sprint: { name: 'Sprint 250', body: 'bike', len: 2.1, wid: 0.8, hgt: 1.1, power: 15, top: 50, grip: 8.5, turn: 2.8, mass: 0.45, colors: ['#e63946', '#1d3557', '#ffb703', '#2ec4b6', '#f1faee'] },
   halcyon: { name: 'Halcyon GT-R', body: 'coupe', len: 4.6, wid: 2.0, hgt: 1.1, power: 21, top: 64, grip: 8.2, turn: 2.35, mass: 1.25, colors: ['#bde0fe'] },
 };
 
@@ -197,7 +198,59 @@ const trimMat = new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 
 const driverMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.75 });
 
 /** Build the model for a make, facing +z. Returns the parts the simulation animates. */
+let bikeParts = null;
+
+/** The Sprint 250: frame, engine, seat, forks and bars merged; tank and fairings in the paint. */
+function buildBike(spec, color) {
+  if (!bikeParts) {
+    const paintP = [];
+    const trimP = [];
+    const P = (list, geo, c, m) => list.push({ geo, color: c, matrix: m });
+    P(paintP, new THREE.SphereGeometry(1, 18, 12), color, mat4(0, 0.86, 0.12, 0.2, 0.15, 0.36));      // tank
+    P(paintP, new THREE.SphereGeometry(1, 18, 12), color, mat4(0, 0.86, 0.68, 0.2, 0.2, 0.26, -0.5));  // front fairing
+    P(paintP, new THREE.SphereGeometry(1, 16, 10), color, mat4(0, 0.86, -0.62, 0.15, 0.1, 0.32, 0.2)); // tail cowl
+    P(trimP, new THREE.CapsuleGeometry(0.11, 0.42, 4, 10), '#1c1d21', mat4(0, 0.9, -0.24, 1, 1, 1, Math.PI / 2)); // seat
+    P(trimP, new THREE.BoxGeometry(0.3, 0.32, 0.48), '#3a3d42', mat4(0, 0.5, 0.02));                   // engine
+    P(trimP, new THREE.CylinderGeometry(0.035, 0.035, 0.75, 8), '#c9ccd1', mat4(0.1, 0.62, 0.74, 1, 1, 1, -0.38));
+    P(trimP, new THREE.CylinderGeometry(0.035, 0.035, 0.75, 8), '#c9ccd1', mat4(-0.1, 0.62, 0.74, 1, 1, 1, -0.38));
+    P(trimP, new THREE.CylinderGeometry(0.025, 0.025, 0.7, 8), '#1c1d21', mat4(0, 1.02, 0.56, 1, 1, 1, 0, 0, Math.PI / 2)); // bars
+    P(trimP, new THREE.CylinderGeometry(0.05, 0.06, 0.7, 10), '#c9ccd1', mat4(0.17, 0.38, -0.45, 1, 1, 1, Math.PI / 2 + 0.2)); // exhaust
+    P(trimP, new THREE.BoxGeometry(0.06, 0.08, 0.9), '#2a2c30', mat4(0, 0.4, -0.38, 1, 1, 1, -0.35)); // swing arm
+    bikeParts = { trim: mergeParts(trimP, true), paintShapes: paintP };
+  }
+  const root = new THREE.Group();
+  const body = new THREE.Group();
+  root.add(body);
+  const paint = new THREE.MeshPhysicalMaterial({ color, roughness: 0.25, metalness: 0.5, clearcoat: 1, clearcoatRoughness: 0.05 });
+  const paintGeo = mergeParts(bikeParts.paintShapes, false);
+  const add = (geo, m, parent = body) => { const mesh = new THREE.Mesh(geo, m); mesh.castShadow = true; parent.add(mesh); return mesh; };
+  add(paintGeo, paint);
+  add(bikeParts.trim, trimMat);
+  const head = new THREE.MeshStandardMaterial({ color: '#fffbe6', emissive: '#fff3c4', emissiveIntensity: 0.3 });
+  const tail = new THREE.MeshStandardMaterial({ color: '#7a0000', emissive: '#ff2020', emissiveIntensity: 0.4 });
+  add(lampGeo, head).position.set(0, 0.92, 0.9);
+  add(box, tail).position.set(0, 0.88, -0.93);
+  body.children[body.children.length - 1].scale.set(0.16, 0.06, 0.04);
+  body.children[body.children.length - 2].scale.set(0.5, 0.5, 0.4);
+  const wheels = [];
+  for (const [z, front] of [[0.78, true], [-0.72, false]]) {
+    const pivot = new THREE.Group();
+    pivot.position.set(0, 0.34, z);
+    const spin = new THREE.Group();
+    spin.scale.set(0.55, 0.9, 0.9);
+    add(modelParts(MODELS.brisa).wheel, wheelMat, spin);
+    pivot.add(spin);
+    body.add(pivot);
+    wheels.push({ pivot, spin, front });
+  }
+  const driver = new THREE.Group();
+  driver.visible = false;
+  body.add(driver);
+  return { root, body, wheels, paint, head, tail, sirens: null, driver };
+}
+
 function buildModel(spec, color) {
+  if (spec.body === 'bike') return buildBike(spec, color);
   const root = new THREE.Group();
   const body = new THREE.Group();
   root.add(body);
@@ -404,7 +457,11 @@ export class Vehicle {
     this.mesh.position.set(this.pos.x, this.y, this.pos.z);
     this.mesh.rotation.y = this.heading;
     // body roll and pitch sell the weight
-    p.body.rotation.z = damp(p.body.rotation.z, clamp(-this.lateral * 0.02 - this.yawRate * this.forward * 0.004, -0.09, 0.09), 8, dt || 1);
+    if (this.spec.body === 'bike') {
+      // a bike leans into the turn instead of rolling out of it
+      this.lean = damp(this.lean || 0, clamp(-this.yawRate * this.forward * 0.05, -0.65, 0.65), 6, dt || 1);
+      p.body.rotation.z = this.lean;
+    } else p.body.rotation.z = damp(p.body.rotation.z, clamp(-this.lateral * 0.02 - this.yawRate * this.forward * 0.004, -0.09, 0.09), 8, dt || 1);
     p.body.rotation.x = damp(p.body.rotation.x, clamp(-this.input.throttle * 0.02, -0.03, 0.03), 6, dt || 1);
     for (const w of p.wheels) {
       w.spin.rotation.x += (this.forward * (dt || 0)) / 0.36;

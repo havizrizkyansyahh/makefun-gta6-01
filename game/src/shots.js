@@ -6,6 +6,7 @@ import { LaneDriver } from './traffic.js';
 import { Vehicle, MODELS } from './vehicles.js';
 import { MISSIONS } from './story.js';
 import { Npc } from './npc.js';
+import { Helicopter } from './helicopter.js';
 
 const STEP = 1 / 30;
 
@@ -86,9 +87,24 @@ export async function stageShot(name, world, { menu, hud }) {
       if (v) { v.kind = 'police'; v.siren = true; v.crew = 2; v.armor = 0.65; v.vel.x *= 3; v.vel.z *= 3; }
     }
     run(world, input, 4.2);
+    // air support already overhead, behind the cruisers
+    if (world.police.heli) world.police.heli.remove();
+    world.police.heli = new Helicopter(world, car.pos.x + 70, car.pos.z - 10);
+    world.police.heli.pos.y = 26;
     // a front three-quarter view: Kai's car coming at the camera, the cruisers on his tail
-    const look = () => { world.rig.yaw = car.heading + Math.PI - 0.55; world.rig.pitch = 0.2; world.rig.idle = 0; };
+    const look = () => { world.rig.yaw = car.heading + Math.PI - 0.55; world.rig.pitch = 0.12; world.rig.idle = 0; };
     look();
+    // bring the chopper in low behind the cruisers, inside the frame
+    const h = world.police.heli;
+    h.heading = car.heading;
+    h.update = (dt) => {
+      // hold station behind the chase for the frame, rotor turning, searchlight on Kai
+      h.pos.set(car.pos.x - car.fx * 60 + car.fz * 6, 13, car.pos.z - car.fz * 60 - car.fx * 6);
+      h.rotor.rotation.y += dt * 28;
+      h.light.set(car.pos.x, 0, car.pos.z);
+      h.spot.target.position.copy(h.light);
+      h.sync();
+    };
     run(world, input, 0.6, look);
   } else if (name === 'combat') {
     world.newGame();
@@ -120,19 +136,27 @@ export async function stageShot(name, world, { menu, hud }) {
     run(world, input, 0.12);
   } else if (name === 'city') {
     world.newGame();
-    world.hour = 18.9;
+    world.hour = 18.85;
     const city = world.city;
-    const t = city.places.tower;
     const p = world.player;
-    // on the plaza's south sidewalk, looking up the avenue into Corvel Heights at dusk
-    p.place(t.x + 30, t.z + 41.5, Math.PI);
+    // Kai on a Sprint 250, heading west past Sunstone Plaza into the towers of Corvel Heights
+    const a = city.nodeId(5, 5);
+    const b = city.nodeId(4, 5);
+    const bike = world.traffic.spawnCar({ a, b, t: 0.15 }, 'sprint');
+    bike.parts.paint.color.set('#ffb703');
+    bike.driver = null;
+    p.pos.x = bike.pos.x; p.pos.z = bike.pos.z;
+    p.tryEnter();
+    bike.vel.x *= 2; bike.vel.z *= 2;
+    const pilot = new LaneDriver(world, bike, a, b, 'traffic');
+    pilot.cruise = 14;
+    pilot.clearAhead = () => Infinity;
+    const drive = p.drive.bind(p);
+    p.drive = (dt, inp) => { drive(dt, inp); if (p.vehicle) pilot.update(dt); };
     world.traffic.update(0, true);
-    input.held.add('KeyW');
-    world.rig.yaw = Math.PI - 0.62;
-    world.rig.pitch = 0.02;
-    run(world, input, 1.6);
-    input.held.clear();
-    run(world, input, 1.0, () => { world.rig.yaw = Math.PI - 0.62; world.rig.pitch = 0.0; });
+    const look = () => { world.rig.yaw = bike.heading + 0.3; world.rig.pitch = 0.07; world.rig.idle = 0; };
+    look();
+    run(world, input, 2.4, look);
   }
   // only the play itself in the frame: no leftover title cards or notices
   hud.el.notes.innerHTML = '';

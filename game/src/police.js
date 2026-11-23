@@ -4,6 +4,7 @@
 // staying out of sight beyond it long enough loses them. Being caught on foot is a bust.
 import { WANTED } from './config.js';
 import { Npc } from './npc.js';
+import { Helicopter } from './helicopter.js';
 
 const CRIMES = {
   shots: { min: 1, add: 0 },
@@ -26,6 +27,8 @@ export class Police {
     this.spawnTimer = 0;
     this.bustTimer = 0;
     this.locked = false;  // missions can pin the level
+    this.heli = null;
+    this.heliGone = 0;
     this.cooldown = 0;
   }
 
@@ -72,6 +75,26 @@ export class Police {
     for (const v of this.world.vehicles) if (v.kind === 'police' && !v.dead && Math.hypot(v.pos.x - x, v.pos.z - z) < r) return true;
     for (const n of this.world.npcs) if (n.role === 'cop' && !n.dead && Math.hypot(n.pos.x - x, n.pos.z - z) < r) return true;
     return false;
+  }
+
+  /** Air support from three stars: send it in, keep it flying, let it leave or clear the wreck. */
+  updateHeli(dt, where, stars) {
+    const w = this.world;
+    if (this.heli) {
+      this.heli.update(dt);
+      if (stars < 3 && this.heli.alive) this.heli.leave = true;
+      if (this.heli.dead || this.heli.leave) this.heliGone += dt;
+      const far = Math.hypot(this.heli.pos.x - where.x, this.heli.pos.z - where.z) > 320;
+      if ((this.heli.leave && (far || this.heliGone > 20)) || (this.heli.dead && this.heliGone > 25)) {
+        this.heli.remove();
+        this.heli = null;
+      }
+    }
+    if (!this.heli && stars >= 3 && !w.player.dead) {
+      const a = w.rng.range(0, Math.PI * 2);
+      this.heli = new Helicopter(w, where.x + Math.cos(a) * 260, where.z + Math.sin(a) * 260);
+      this.heliGone = 0;
+    }
   }
 
   /** Spawn a cruiser on a road out of the player's sight, 90-160 m away. */
@@ -140,6 +163,9 @@ export class Police {
           if (Math.hypot(n.pos.x - where.x, n.pos.z - where.z) < WANTED.sightRange && w.city.lineOfSight(n.pos.x, 1.6, n.pos.z, where.x, 1.4, where.z)) { this.seen = true; break; }
         }
       }
+      if (!this.seen && this.heli && this.heli.alive && !this.heli.leave
+        && Math.hypot(this.heli.pos.x - where.x, this.heli.pos.z - where.z) < 80
+        && this.heli.sees(where.x, 0.5, where.z)) this.seen = true;
       if (this.seen) {
         this.lastSeen = { x: where.x, z: where.z };
         this.hidden = 0;
@@ -152,6 +178,8 @@ export class Police {
         }
       }
     }
+
+    this.updateHeli(dt, where, stars);
 
     // keep the right number of units on the board
     this.spawnTimer -= dt;

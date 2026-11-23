@@ -69,6 +69,7 @@ export class Sound {
     this.buildEngine();
     this.buildSiren();
     this.buildSkid();
+    this.buildRotor();
     this.timer = setInterval(() => this.schedule(), 50);
   }
 
@@ -279,6 +280,32 @@ export class Sound {
   skid(level) {
     if (!this.ctx) return;
     this.skidGain.gain.setTargetAtTime(level * 0.12, this.ctx.currentTime, 0.05);
+  }
+
+  /** Helicopter blades: low noise chopped by a fast amplitude wobble. */
+  buildRotor() {
+    const ctx = this.ctx;
+    const src = this.noiseSource();
+    const f = ctx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.value = 380;
+    const chop = ctx.createGain();
+    chop.gain.value = 0.5;
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = 13;
+    const depth = ctx.createGain();
+    depth.gain.value = 0.5;
+    lfo.connect(depth).connect(chop.gain);
+    this.rotorGain = ctx.createGain();
+    this.rotorGain.gain.value = 0;
+    src.connect(f).connect(chop).connect(this.rotorGain).connect(this.sfx);
+    src.start();
+    lfo.start();
+  }
+
+  rotor(level) {
+    if (!this.ctx) return;
+    this.rotorGain.gain.setTargetAtTime(level * 0.5, this.ctx.currentTime, 0.2);
   }
 
   // ------------------------------------------------------------ radio

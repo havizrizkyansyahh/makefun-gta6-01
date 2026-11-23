@@ -113,13 +113,25 @@ export class LaneDriver {
     const targetSpeed = w.player.vehicle ? w.player.vehicle.speed : 0;
     if (this.direct && targetSpeed < 6) want = tdist < 13 ? 0 : Math.min(want, 6 + tdist * 0.5);
 
+    // stop at the line on red (and on amber when there is room to stop); police and the
+    // fleeing van run the lights
+    if (this.mode === 'traffic' && w.signals) {
+      const light = w.signals.state(this.b, Math.abs(dx) > Math.abs(dz) ? 'x' : 'z');
+      const stopAt = len - CITY.roadHalf - 3.2;
+      const toLine = stopAt - proj;
+      if (toLine > -0.5 && toLine < 40 && (light === 'red' || (light === 'amber' && toLine > 9))) {
+        want = Math.min(want, Math.max(0, toLine * 0.55 - 0.3));
+        this.waiting = true;
+      } else this.waiting = false;
+    }
+
     // brake for whatever is in front
     if (this.mode === 'traffic') {
       const gap = this.clearAhead(10 + Math.abs(speed) * 1.1);
       if (gap < Infinity) want = Math.min(want, Math.max(0, (gap - 5) * 0.8));
       if (want < 1 && gap < 9) {
         this.blocked += dt;
-        if (this.blocked > 4 && Math.random() < dt) w.audio.horn();
+        if (this.blocked > 6 && !this.waiting && Math.random() < dt * 0.5) w.audio.horn();
       } else this.blocked = 0;
     }
 
@@ -129,7 +141,7 @@ export class LaneDriver {
       this.reverse -= dt;
       throttle = -0.8;
       steer = -steer;
-    } else if (want > 3 && Math.abs(speed) < 0.6) {
+    } else if (want > 3 && Math.abs(speed) < 0.6 && !this.waiting) {
       this.stuck += dt;
       if (this.stuck > (this.mode === 'traffic' ? 3 : 1.2)) { this.reverse = 1.4; this.stuck = 0; }
     } else this.stuck = 0;
@@ -192,7 +204,7 @@ export class Traffic {
   spawnParked() {
     const w = this.world;
     for (const spot of w.city.parking) {
-      const key = w.rng.pick(['brisa', 'corso', 'ardent', 'bayrunner', 'halden', 'pelican', 'corso', 'marlin']);
+      const key = w.rng.pick(['brisa', 'corso', 'ardent', 'bayrunner', 'halden', 'pelican', 'corso', 'marlin', 'sprint', 'sprint']);
       const v = new Vehicle(w.scene, key, w.rng.pick(MODELS[key].colors), spot.x, spot.z, spot.heading);
       v.y = w.city.groundHeight(spot.x, spot.z);
       v.kind = 'parked';
