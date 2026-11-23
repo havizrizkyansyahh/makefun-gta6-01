@@ -1,134 +1,145 @@
-// Boot and the one loop: input is read every frame, the world advances in fixed 1/60 s steps
-// (several in a slow frame, none in a fast one), and the renderer paints what is there. The game
-// moves between four screens: title, play, paused and game over.
-//
-// ?seed=N fixes the falling pattern. ?shot=start|play|end (with &seed=N) stages that scene
-// instead of running the loop, paints it twice and sets window.__shotReady for a screenshot.
-import { BEST_KEY, LIVES, STEP } from './config.js';
-import { createRandom } from './random.js';
-import { createWorld, EVENT_HIT, EVENT_OVER } from './world.js';
-import { ACTION_CONFIRM, ACTION_PAUSE, createInput } from './input.js';
-import { createRenderer, SCREEN_OVER, SCREEN_PAUSED, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
-import { stageShot } from './shots.js';
-
-/** The longest frame the loop catches up on; a longer stall (a hidden tab) is dropped, not replayed. */
-const MAX_FRAME = 0.25;
-
-const params = new URLSearchParams(window.location.search);
-const shot = params.get('shot');
-const seedParam = Number.parseInt(params.get('seed') ?? '', 10);
-const seed = Number.isInteger(seedParam) ? seedParam : Math.floor(Math.random() * 4294967296);
+// Entry point: sets up the renderer, sound, HUD, menus, input and the world, then runs the frame
+// loop through three states: the title screen (a slow camera flight over the live city), play,
+// and pause. ?shot=<name> stages one of the screenshot scenes instead (see shots.js).
+import * as THREE from '../vendor/three.module.min.js';
+import { World } from './world.js';
+import { Input } from './input.js';
+import { Sound } from './audio.js';
+import { Hud } from './hud.js';
+import { Menu } from './menu.js';
+import { CAMERA } from './config.js';
 
 const canvas = document.getElementById('game');
-const status = document.getElementById('status');
-const world = createWorld(createRandom(seed));
-const renderer = createRenderer(canvas);
+const params = new URLSearchParams(location.search);
+const shot = params.get('shot');
 
-function readBest() {
-  try {
-    return Number.parseInt(window.localStorage.getItem(BEST_KEY) ?? '0', 10) || 0;
-  } catch {
-    return 0;
-  }
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: !!shot });
+renderer.setPixelRatio(Math.min(devicePixelRatio, shot ? 1 : 1.75));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+const audio = new Sound();
+const hud = new Hud(document.getElementById('hud'));
+const menu = new Menu(document.getElementById('menu'), audio);
+const input = new Input(canvas);
+const world = new World(renderer, audio, hud, Number(params.get('seed')) || 7);
+window.solmara = world; // handy from the devtools console
+
+let state = 'title';
+let titleT = 0;
+
+function applySettings(s) {
+  world.rig.sensitivity = CAMERA.sensitivity * s.sensitivity;
+  world.rig.invertY = s.invertY;
+  audio.volume.master = s.master;
+  audio.volume.music = s.music;
+  audio.applyVolume();
+  world.density = s.density;
+  world.difficulty = s.difficulty;
+}
+applySettings(menu.settings);
+menu.on('settings', applySettings);
+
+function play() {
+  menu.hide();
+  state = 'play';
+  hud.show(true);
+  input.enabled = true;
+  input.requestLock();
+  audio.unlock();
+  if (!world.player.vehicle) audio.tune(-1);
 }
 
-function saveBest(value) {
-  try {
-    window.localStorage.setItem(BEST_KEY, String(value));
-  } catch {
-    // Storage can be off (private windows): the best score then lasts this visit only.
-  }
+menu.on('new', () => {
+  world.player.human.root.visible = true;
+  play();
+  world.hud.bigText('SOLMARA BAY', 'Six years away. One sister, one debt, one city.', 4.5, '#ffd27a');
+  setTimeout(() => world.hud.notify('Follow the N on the minimap to meet Nadia.'), 2500);
+});
+menu.on('continue', (save) => {
+  world.load(save);
+  world.player.human.root.visible = true;
+  play();
+  world.hud.notify('Welcome back to Solmara Bay.');
+});
+menu.on('resume', () => play());
+menu.on('quit', () => {
+  world.save();
+  location.reload();
+});
+
+input.onLockChange = (locked) => {
+  if (!locked && state === 'play') pause();
+};
+canvas.addEventListener('click', () => { if (state === 'play') input.requestLock(); });
+
+function pause(page) {
+  state = 'pause';
+  input.enabled = false;
+  audio.engine(false, 0, 0);
+  audio.siren(0);
+  audio.skid(0);
+  menu.pause(world);
+  if (page === 'map') menu.map(world);
 }
 
-function runShot(name) {
-  const scene = stageShot(name, world);
-  let painted = 0;
-  function paint() {
-    renderer.draw(world.state, scene.screen, scene.best);
-    painted += 1;
-    if (painted < 2) requestAnimationFrame(paint);
-    else window.__shotReady = true;
-  }
-  requestAnimationFrame(paint);
+function title() {
+  state = 'title';
+  hud.show(false);
+  input.enabled = false;
+  world.newGame();
+  world.player.human.root.visible = false;
+  menu.title(World.readSave());
+  // title music starts with the first click anywhere
+  const start = () => { audio.unlock(); if (state === 'title') audio.tune(0); window.removeEventListener('pointerdown', start); };
+  window.addEventListener('pointerdown', start);
 }
 
-function runGame() {
-  const input = createInput(canvas);
-  let screen = SCREEN_TITLE;
-  let best = readBest();
-  let accumulator = 0;
-  let last = performance.now();
+/** The title camera drifts along the beach boulevard looking back at the skyline. */
+function titleCamera(dt) {
+  titleT += dt;
+  const a = titleT * 0.035;
+  const c = world.city.places.nadia;
+  const cam = world.camera;
+  cam.position.set(c.x + Math.sin(a) * 120, 38 + Math.sin(titleT * 0.1) * 6, c.z + 60 + Math.cos(a) * 25);
+  cam.lookAt(c.x - Math.sin(a) * 60, 18, c.z - 220);
+  if (cam.fov !== 55) { cam.fov = 55; cam.updateProjectionMatrix(); }
+}
 
-  // Screen readers (and anyone watching the page's text) hear the screen changes and each hit.
-  function announce(message) {
-    status.textContent = message;
+addEventListener('resize', () => {
+  renderer.setSize(innerWidth, innerHeight);
+  world.camera.aspect = innerWidth / innerHeight;
+  world.camera.updateProjectionMatrix();
+});
+
+addEventListener('keydown', (e) => {
+  if (state === 'play' && e.code === 'KeyM') pause('map');
+  if (state === 'play' && e.code === 'Escape') pause();
+});
+
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  if (state === 'play') {
+    world.step(dt, input);
+  } else if (state === 'title') {
+    world.step(dt, input);
+    titleCamera(dt);
   }
-
-  function startGame() {
-    world.reset();
-    accumulator = 0;
-    screen = SCREEN_PLAY;
-    announce(`Playing. ${LIVES} lives.`);
-  }
-
-  function endGame() {
-    screen = SCREEN_OVER;
-    if (world.state.score > best) {
-      best = world.state.score;
-      saveBest(best);
-    }
-    announce(`Game over. Score ${world.state.score}. Best ${best}.`);
-  }
-
-  function handleActions() {
-    const actions = input.takeActions();
-    if (actions & ACTION_CONFIRM && (screen === SCREEN_TITLE || screen === SCREEN_OVER)) startGame();
-    else if (actions & ACTION_PAUSE && screen === SCREEN_PLAY) {
-      screen = SCREEN_PAUSED;
-      announce('Paused.');
-    } else if (actions & (ACTION_PAUSE | ACTION_CONFIRM) && screen === SCREEN_PAUSED) {
-      screen = SCREEN_PLAY;
-      announce('Playing.');
-    }
-  }
-
-  function step() {
-    if (screen === SCREEN_TITLE) {
-      world.step(STEP, 0, true);
-      return;
-    }
-    const events = world.step(STEP, input.direction(), false);
-    if (events & EVENT_OVER) endGame();
-    else if (events & EVENT_HIT) announce(world.state.lives === 1 ? 'Hit. 1 life left.' : `Hit. ${world.state.lives} lives left.`);
-  }
-
-  function frame(now) {
-    requestAnimationFrame(frame);
-    accumulator += Math.min((now - last) / 1000, MAX_FRAME);
-    last = now;
-    handleActions();
-    if (screen === SCREEN_TITLE || screen === SCREEN_PLAY) {
-      while (accumulator >= STEP && (screen === SCREEN_TITLE || screen === SCREEN_PLAY)) {
-        step();
-        accumulator -= STEP;
-      }
-    } else {
-      accumulator = 0;
-    }
-    renderer.draw(world.state, screen, best);
-  }
-
-  // Leaving the tab pauses a running game rather than letting blocks fall unseen.
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden && screen === SCREEN_PLAY) {
-      screen = SCREEN_PAUSED;
-      announce('Paused.');
-    }
-  });
-
-  announce('Block Dodger. Press Space or click to start.');
+  world.render();
+  input.endFrame();
   requestAnimationFrame(frame);
 }
 
-if (shot) runShot(shot);
-else runGame();
+document.getElementById('loading').remove();
+if (shot) {
+  import('./shots.js').then((m) => m.stageShot(shot, world, { menu, hud, input, renderer }));
+} else {
+  title();
+  requestAnimationFrame(frame);
+}

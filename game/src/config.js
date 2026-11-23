@@ -1,61 +1,61 @@
-// Every tuning number and colour in one place. The playfield is a fixed 1280x720 logical area;
-// the renderer scales it to the window, so no rule below depends on the screen size.
+// Tunable numbers for Solmara Bay, kept in one place so the feel of the game can be adjusted
+// without hunting through the systems that use them.
 
-export const FIELD = { width: 1280, height: 720, groundY: 664 };
-
-/** The simulation's fixed step, in seconds: 60 updates a second whatever the display's rate. */
-export const STEP = 1 / 60;
+/** City grid: 9 x 9 blocks between 10 x 10 road lines, centred on the origin. */
+export const CITY = {
+  blocks: 9,
+  pitch: 92,          // distance between road centre lines (m)
+  roadHalf: 7,        // half the asphalt width (one lane each way)
+  laneOffset: 3.4,    // lane centre from the road centre line
+  walk: 4.5,          // sidewalk width inside every block edge
+  curb: 0.18,         // sidewalk height
+  shore: 52,          // sand between the southern boulevard and the sea
+  bounds: 560,        // hard limit of the playable square
+};
 
 export const PLAYER = {
-  width: 72,
-  height: 24,
-  speed: 560,
-  invulnerable: 1.5,
+  walk: 4.2,
+  run: 7.6,
+  jump: 6.2,
+  gravity: 19,
+  radius: 0.42,
+  height: 1.8,
+  maxHealth: 100,
+  maxArmor: 100,
 };
 
-export const LIVES = 3;
-
-export const BLOCK = {
-  minWidth: 40,
-  maxWidth: 110,
-  height: 36,
-  speed: 240,
-  speedPerLevel: 30,
-  speedJitter: 90,
-  interval: 0.55,
-  intervalScale: 0.88,
-  minInterval: 0.14,
-  dodgePoints: 1,
+export const CAMERA = {
+  footDistance: 4.6,
+  footHeight: 1.65,
+  aimDistance: 2.3,
+  carDistance: 8.4,
+  carHeight: 2.9,
+  fov: 62,
+  sensitivity: 0.0023,
 };
 
-export const COIN = {
-  size: 24,
-  speed: 190,
-  speedPerLevel: 14,
-  interval: 1.4,
-  intervalJitter: 0.8,
-  points: 10,
+export const TRAFFIC = {
+  cars: 26,
+  parked: 18,
+  peds: 42,
+  spawnMin: 110,
+  spawnMax: 230,
+  despawn: 280,
+  cruise: 13,
 };
 
-/** Seconds of play per level, and the last level: speeds and spawn rates stop growing there. */
-export const LEVEL = { seconds: 12, max: 12 };
-
-/** How many falling things can exist at once; the pool is allocated once, at boot. */
-export const POOL_SIZE = 64;
-
-export const PALETTE = {
-  backdrop: '#11141b',
-  sky: '#1b1f2a',
-  ground: '#2a3040',
-  player: '#4fc3f7',
-  block: '#e5534b',
-  coin: '#f2c94c',
-  panel: '#252b38',
-  text: '#eef1f5',
-  muted: '#8b93a3',
+/** Wanted level: police units on the board and how long a quiet escape takes, per star. */
+export const WANTED = {
+  maxStars: 5,
+  units: [0, 2, 3, 4, 6, 7],
+  searchRadius: [0, 70, 90, 115, 140, 170],
+  escapeTime: [0, 6, 9, 12, 16, 20],
+  sightRange: 55,
 };
 
-export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
+/** One game day lasts this many real seconds; play starts in the golden late afternoon. */
+export const DAY_SECONDS = 1440;
+export const START_HOUR = 16.6;
 
-/** Where the best score is kept between visits (this browser only). */
-export const BEST_KEY = 'block-dodger.best';
+export const SAVE_KEY = 'solmara-bay-save-v1';
+export const SETTINGS_KEY = 'solmara-bay-settings-v1';

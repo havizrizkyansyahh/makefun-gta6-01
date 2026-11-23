@@ -1,53 +1,75 @@
-// Keyboard and pointer input. Held keys give a steering direction; one-shot presses (start or
-// restart, pause) are queued as bit flags and taken once by the loop, so a press between two
-// frames is never lost and never counted twice.
+// Keyboard and mouse: held keys, keys pressed this frame, mouse movement under pointer lock,
+// buttons and the wheel. Systems read it; main.js clears the per-frame parts after each frame.
 
-export const ACTION_CONFIRM = 1;
-export const ACTION_PAUSE = 2;
+export class Input {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.held = new Set();
+    this.pressed = new Set();
+    this.mouseDX = 0;
+    this.mouseDY = 0;
+    this.buttons = 0;
+    this.clicked = 0;
+    this.wheel = 0;
+    this.locked = false;
+    this.enabled = true;
 
-const LEFT = new Set(['ArrowLeft', 'KeyA']);
-const RIGHT = new Set(['ArrowRight', 'KeyD']);
-const CONFIRM = new Set(['Space', 'Enter']);
-const PAUSE = new Set(['KeyP', 'Escape']);
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Tab' || e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
+      if (!this.held.has(e.code)) this.pressed.add(e.code);
+      this.held.add(e.code);
+    });
+    window.addEventListener('keyup', (e) => this.held.delete(e.code));
+    window.addEventListener('blur', () => { this.held.clear(); this.buttons = 0; });
+    window.addEventListener('mousemove', (e) => {
+      if (!this.locked) return;
+      this.mouseDX += e.movementX;
+      this.mouseDY += e.movementY;
+    });
+    canvas.addEventListener('mousedown', (e) => {
+      this.buttons |= 1 << e.button;
+      this.clicked |= 1 << e.button;
+    });
+    window.addEventListener('mouseup', (e) => { this.buttons &= ~(1 << e.button); });
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    window.addEventListener('wheel', (e) => { this.wheel += Math.sign(e.deltaY); }, { passive: true });
+    document.addEventListener('pointerlockchange', () => {
+      this.locked = document.pointerLockElement === canvas;
+      if (this.onLockChange) this.onLockChange(this.locked);
+    });
+  }
 
-export function createInput(target) {
-  let left = false;
-  let right = false;
-  let actions = 0;
+  requestLock() {
+    if (!this.locked && this.canvas.requestPointerLock) {
+      try {
+        const r = this.canvas.requestPointerLock();
+        if (r && r.catch) r.catch(() => { /* not allowed yet (no user gesture) */ });
+      } catch { /* not allowed yet */ }
+    }
+  }
 
-  window.addEventListener('keydown', (event) => {
-    if (LEFT.has(event.code)) left = true;
-    else if (RIGHT.has(event.code)) right = true;
-    else if (CONFIRM.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_CONFIRM;
-    } else if (PAUSE.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_PAUSE;
-    } else return;
-    event.preventDefault();
-  });
-  window.addEventListener('keyup', (event) => {
-    if (LEFT.has(event.code)) left = false;
-    else if (RIGHT.has(event.code)) right = false;
-  });
-  // A key released while the tab is hidden never sends keyup: let go of everything on blur.
-  window.addEventListener('blur', () => {
-    left = false;
-    right = false;
-  });
-  target.addEventListener('pointerdown', () => {
-    actions |= ACTION_CONFIRM;
-  });
+  releaseLock() {
+    if (this.locked) document.exitPointerLock();
+  }
 
-  return {
-    /** -1 for left, 1 for right, 0 for neither or both. */
-    direction() {
-      return (right ? 1 : 0) - (left ? 1 : 0);
-    },
-    /** The one-shot presses since the last call, as ACTION_* flags. */
-    takeActions() {
-      const taken = actions;
-      actions = 0;
-      return taken;
-    },
-  };
+  down(code) { return this.enabled && this.held.has(code); }
+  hit(code) { return this.enabled && this.pressed.has(code); }
+  mouse(button) { return this.enabled && (this.buttons & (1 << button)) !== 0; }
+  mouseHit(button) { return this.enabled && (this.clicked & (1 << button)) !== 0; }
+
+  /** -1..1 on an axis from two keys (or their arrow twins). */
+  axis(neg, pos, negAlt, posAlt) {
+    let v = 0;
+    if (this.down(neg) || (negAlt && this.down(negAlt))) v -= 1;
+    if (this.down(pos) || (posAlt && this.down(posAlt))) v += 1;
+    return v;
+  }
+
+  endFrame() {
+    this.pressed.clear();
+    this.clicked = 0;
+    this.mouseDX = 0;
+    this.mouseDY = 0;
+    this.wheel = 0;
+  }
 }

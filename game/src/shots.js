@@ -1,79 +1,129 @@
-// The screenshot scenes behind ?shot=start|play|end. Each one plays the real rules forward from a
-// fresh world for a fixed number of steps, steered by a simple autopilot (look ahead each way the
-// paddle could move, keep clear of blocks, chase the lowest coin when that is safe), so the frame
-// is what a short game really looks like and the same seed always gives the same frame.
-import { FIELD, PLAYER, STEP } from './config.js';
-import { EVENT_OVER, KIND_BLOCK } from './world.js';
-import { SCREEN_OVER, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
+// The screenshot scenes behind ?shot=cover|combat|city|title. Each one builds the real world
+// from its seed, sets up a moment of play (a mission step, a wanted level, a car or a gun in
+// hand), runs the actual simulation forward with a simple autopilot standing in for the
+// player, then renders and sets window.__shotReady so a capture tool can take the frame.
+import { LaneDriver } from './traffic.js';
+import { Vehicle, MODELS } from './vehicles.js';
+import { MISSIONS } from './story.js';
+import { Npc } from './npc.js';
 
-const START_SECONDS = 5;
-const PLAY_SECONDS = 26;
-const END_LIMIT_SECONDS = 600;
-/**
- * How far ahead, in seconds, the autopilot checks each way it could move: the play scene's pilot
- * looks well ahead and keeps all its lives; the end scene's looks only a moment ahead, so it is
- * caught out once the blocks speed up, as a hurried player is.
- */
-const HORIZON_PLAY = 0.7;
-const HORIZON_END = 0.25;
-const SAMPLE = 1 / 30;
-const DIRECTIONS = [0, -1, 1];
-/** Extra room, each side, it keeps between the paddle and a block. */
-const MARGIN = 10;
+const STEP = 1 / 30;
 
-/** Seconds until moving in `direction` (-1, 0, 1) runs the paddle into a block; Infinity when it never does. */
-function timeToHit(state, direction, horizon) {
-  const player = state.player;
-  for (let t = SAMPLE; t <= horizon; t += SAMPLE) {
-    const x = Math.min(FIELD.width - player.width, Math.max(0, player.x + direction * PLAYER.speed * t));
-    for (let index = 0; index < state.items.length; index += 1) {
-      const item = state.items[index];
-      if (!item.active || item.kind !== KIND_BLOCK) continue;
-      const y = item.y + item.speed * t;
-      if (y + item.height > player.y && y < player.y + player.height && item.x < x + player.width + MARGIN && item.x + item.width > x - MARGIN) return t;
-    }
-  }
-  return Infinity;
+/** Input stand-in: the autopilot presses keys by name. */
+function fakeInput() {
+  const held = new Set();
+  return {
+    held,
+    mouseDX: 0, mouseDY: 0, wheel: 0, locked: true, enabled: true,
+    down: (c) => held.has(c),
+    hit: () => false,
+    mouse: (b) => held.has(`M${b}`),
+    mouseHit: (b) => held.has(`M${b}`),
+    axis(neg, pos) { return (held.has(pos) ? 1 : 0) - (held.has(neg) ? 1 : 0); },
+    endFrame() {},
+  };
 }
 
-/** Of the safe ways to move, the one toward the lowest coin (or the centre); else the one that is hit last. */
-function autopilot(state, horizon) {
-  const player = state.player;
-  let coin = null;
-  for (let index = 0; index < state.items.length; index += 1) {
-    const item = state.items[index];
-    if (item.active && item.kind !== KIND_BLOCK && (coin === null || item.y > coin.y)) coin = item;
+function run(world, input, seconds, each) {
+  const n = Math.round(seconds / STEP);
+  for (let i = 0; i < n; i += 1) {
+    if (each) each(i * STEP);
+    world.step(STEP, input);
   }
-  const target = coin === null ? FIELD.width / 2 : coin.x + coin.width / 2;
-  const centre = player.x + player.width / 2;
-  const wanted = target > centre + 8 ? 1 : target < centre - 8 ? -1 : 0;
-  let best = wanted;
-  let bestTime = timeToHit(state, wanted, horizon);
-  for (let index = 0; index < DIRECTIONS.length && bestTime !== Infinity; index += 1) {
-    const time = timeToHit(state, DIRECTIONS[index], horizon);
-    if (time > bestTime) {
-      bestTime = time;
-      best = DIRECTIONS[index];
-    }
-  }
-  return best;
 }
 
-/**
- * Set `world` to the named scene (start, play or end; any other name is start) and return the
- * screen to draw over it and the best score to show.
- */
-export function stageShot(name, world) {
-  world.reset();
-  if (name !== 'play' && name !== 'end') {
-    for (let index = 0; index < START_SECONDS / STEP; index += 1) world.step(STEP, 0, true);
-    return { screen: SCREEN_TITLE, best: 0 };
+function startMission(world, id, step) {
+  const def = MISSIONS.find((m) => m.id === id);
+  for (const m of MISSIONS) { if (m === def) break; world.missions.completed.add(m.id); }
+  world.missions.start(def);
+  while (world.missions.active && world.missions.active.step < step) world.missions.advance();
+  world.missions.lines = [];
+}
+
+export async function stageShot(name, world, { menu, hud }) {
+  const input = fakeInput();
+  world.godMode = true;
+  if (name === 'title') {
+    world.newGame();
+    world.player.human.root.visible = false;
+    world.hour = 17.9;
+    hud.show(false);
+    run(world, input, 2);
+    const c = world.city.places.nadia;
+    world.camera.position.set(c.x + 40, 34, c.z + 58);
+    world.camera.lookAt(c.x - 30, 22, c.z - 220);
+    world.camera.fov = 55;
+    world.camera.updateProjectionMatrix();
+    menu.title({ money: 18450, savedAt: Date.UTC(2026, 10, 23, 18, 30), missions: { completed: ['salt-air', 'rinse-cycle', 'broken-glass'] } });
+  } else if (name === 'cover') {
+    world.newGame();
+    world.hour = 17.7;
+    const city = world.city;
+    // the beach boulevard, heading west with the sun ahead
+    const j = 9;
+    const a = city.nodeId(6, j);
+    const b = city.nodeId(5, j);
+    const car = world.traffic.spawnCar({ a, b, t: 0.1 }, 'ardent');
+    car.parts.paint.color.set('#e63946');
+    car.driver = null;
+    world.player.tryEnterVehicle = null;
+    world.player.pos.x = car.pos.x; world.player.pos.z = car.pos.z;
+    world.player.tryEnter();
+    const pilot = new LaneDriver(world, car, a, b, 'traffic');
+    pilot.cruise = 27;
+    startMission(world, 'tide-money', 2);
+    world.police.set(3);
+    world.police.locked = true;
+    // three cruisers already on his tail
+    for (let k = 0; k < 3; k += 1) {
+      const v = world.traffic.spawnCar({ a: city.nodeId(7, j), b: city.nodeId(6, j), t: 0.25 + k * 0.22 }, 'cruiser', 'chase');
+      if (v) { v.kind = 'police'; v.siren = true; v.crew = 2; v.ai.cruise = 30; }
+    }
+    run(world, input, 5.2, () => { pilot.update(); });
+    world.rig.yaw = car.heading + 0.32;
+    world.rig.pitch = 0.16;
+    world.rig.idle = 0;
+    run(world, input, 0.6, () => { pilot.update(); world.rig.idle = 0; });
+  } else if (name === 'combat') {
+    world.newGame();
+    world.hour = 15.2;
+    startMission(world, 'broken-glass', 1);
+    const shop = world.city.places.chopShop;
+    const p = world.player;
+    p.place(shop.x - 3, shop.z + 52, Math.PI);
+    p.give('smg', 200);
+    p.select('smg');
+    const gang = world.missions.active.ctx.data.gang || [];
+    for (const g of gang) g.state = 'combat';
+    world.rig.yaw = Math.PI + 0.05;
+    world.rig.pitch = 0.08;
+    input.held.add('M2');
+    input.held.add('M0');
+    run(world, input, 1.6, () => {
+      const t = gang.find((g) => !g.dead);
+      if (t) {
+        const dx = t.pos.x - p.pos.x;
+        const dz = t.pos.z - p.pos.z;
+        world.rig.yaw = Math.atan2(dx, dz);
+        world.rig.pitch = 0.02;
+      }
+    });
+  } else if (name === 'city') {
+    world.newGame();
+    world.hour = 13.5;
+    const pl = world.city.places.nadia;
+    const p = world.player;
+    p.place(pl.x + 30, pl.z - 16, -Math.PI / 2);
+    input.held.add('KeyW');
+    world.rig.yaw = -Math.PI / 2 - 0.55;
+    world.rig.pitch = 0.12;
+    run(world, input, 2.5);
+    input.held.clear();
+    run(world, input, 0.8);
   }
-  const limit = name === 'end' ? END_LIMIT_SECONDS : PLAY_SECONDS;
-  const horizon = name === 'end' ? HORIZON_END : HORIZON_PLAY;
-  for (let index = 0; index < limit / STEP; index += 1) {
-    if (world.step(STEP, autopilot(world.state, horizon), false) & EVENT_OVER) break;
-  }
-  const over = world.state.lives === 0;
-  return { screen: over ? SCREEN_OVER : SCREEN_PLAY, best: world.state.score };
+  void Vehicle; void MODELS; void Npc;
+  world.render();
+  hud.update(0);
+  world.render();
+  window.__shotReady = true;
 }
