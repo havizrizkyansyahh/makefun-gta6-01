@@ -15,7 +15,7 @@ import { Police } from './police.js';
 import { Missions } from './missions.js';
 import { CameraRig } from './camera.js';
 import { collideVehicles, Vehicle, headlightGlow } from './vehicles.js';
-import { Pickup } from './markers.js';
+import { Pickup, Marker } from './markers.js';
 import { STATIONS } from './audio.js';
 import { CITY, DAY_SECONDS, START_HOUR, SAVE_KEY, PLAYER } from './config.js';
 import { makeRng } from './rng.js';
@@ -277,6 +277,14 @@ export class World {
     this.weather.update(dt);
     this.weather.applyToSky(this.sky, this.scene);
     this.city.setWet(this.weather.wet);
+    if (this.waypoint) {
+      const wp = this.waypoint;
+      wp.marker.update(dt);
+      wp.t -= dt;
+      if (wp.t <= 0) { wp.t = 0.5; this.updateRoute(); }
+      const here = this.where();
+      if (Math.hypot(here.x - wp.x, here.z - wp.z) < 12) { this.clearWaypoint(); this.hud.notify('You have arrived.'); this.audio.ui('pickup'); }
+    }
     this.lightsOn();
     this.city.syncSky(this.sky.uniforms);
     this.city.update(this.time, this.sky.night);
@@ -420,6 +428,28 @@ export class World {
     const d = Math.hypot(p.pos.x - v.pos.x, p.pos.z - v.pos.z);
     if (d < 7) this.hurtPlayer(110 * (1 - d / 7), v);
     if (v.mission === true || v.kind === 'police') this.police.report('shots', v.pos.x, v.pos.z, false);
+  }
+
+  /** Drop a waypoint: a purple beam in the world and a GPS route along the streets. */
+  setWaypoint(x, z) {
+    this.clearWaypoint();
+    const y = this.city.groundHeight(x, z);
+    this.waypoint = { x, z, marker: new Marker(this.scene, x, z, '#c77dff', 2.2, y), route: [], t: 0 };
+    this.updateRoute();
+  }
+
+  clearWaypoint() {
+    if (this.waypoint) this.waypoint.marker.remove();
+    this.waypoint = null;
+  }
+
+  /** Recompute the route from wherever the player is now. */
+  updateRoute() {
+    const wp = this.waypoint;
+    if (!wp) return;
+    const at = this.where();
+    const nodes = this.city.route(this.city.nearestNode(at.x, at.z), this.city.nearestNode(wp.x, wp.z));
+    wp.route = [{ x: at.x, z: at.z }, ...nodes.map((n) => ({ x: this.city.nodes[n].x, z: this.city.nodes[n].z })), { x: wp.x, z: wp.z }];
   }
 
   /** Headlights: beams on the road for every car, real light from the player's own. */

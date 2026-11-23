@@ -3,6 +3,7 @@
 // Settings, Quit), the settings that are kept between sessions, and keyboard navigation.
 import { SETTINGS_KEY } from './config.js';
 import { MISSIONS } from './story.js';
+import { MapView } from './mapview.js';
 
 export const DEFAULT_SETTINGS = { sensitivity: 1, invertY: false, master: 0.8, music: 0.55, density: 1, difficulty: 1 };
 
@@ -175,26 +176,51 @@ export class Menu {
 
   map(world) {
     const obj = world.missions.objective();
-    const legend = [
-      ['#ffb000', 'N', 'Nadia (story)'], ['#ff5fa2', 'P', 'Pearl (story)'], ['#52d273', 'H', "Kai's apartment: save"],
-      ['#ff7043', 'G', 'Coastline Arms: guns'], ['#4fc3f7', 'C', 'Bayline Couriers'], ['#ff9f1c', 'R', 'Bayside Run: street race'],
-      ['#ffd23f', '', 'Objective'], ['#ff3b3b', '', 'Police'], ['#ff96be', '', 'Sun Shell'],
-    ];
+    const hud = world.hud;
     const done = world.missions.completed.size;
+    const next = world.missions.next();
+    const finale = !next || next.id === 'glass-houses';
+    const people = [
+      ['kai', 'Kai Moreno', 'You. Back from six years on the northern boats.', `$${Math.floor(world.money).toLocaleString('en-US')} · health ${Math.round(world.player.health)}`],
+      ['nadia', 'Nadia Moreno', "Kai's sister. Runs the Sol y Sal food truck on Palmline Beach.", next && next.giver === 'nadia' ? `Has work for you: ${next.title}` : 'On the beach'],
+      ['pearl', 'Auntie Pearl', 'Spin City Laundry. Launders more than shirts.', next && next.giver === 'pearl' ? `Has work for you: ${next.title}` : 'At the laundry'],
+      ['halo', finale ? 'Halo Calder' : '???', finale ? 'Boss of the Glass Saints, up in Corvel Heights.' : 'Whoever runs the Glass Saints.', finale ? 'Wanted: by you' : 'Unknown'],
+    ];
+    const legend = [['house', "Kai's apartment: save"], ['gun', 'Coastline Arms'], ['box', 'Bayline Couriers'], ['flag', 'Bayside Run'], ['hospital', 'St. Amara Medical'], ['police', 'Solmara Bay PD'], ['objective', 'Objective'], ['waypoint', 'Waypoint']];
     this.push({
       kind: 'map',
-      body: `<div class="mapwrap"><canvas class="bigmap" width="1000" height="1000"></canvas>
+      body: `<div class="mapwrap">
+        <div class="mapbox">
+          <canvas class="bigmap" width="1000" height="1000"></canvas>
+          <div class="mapcard"></div>
+          <div class="maptools"><button data-act="in">+</button><button data-act="out">&minus;</button><button data-act="kai">Kai</button><button data-act="clear">Clear waypoint</button></div>
+          <div class="maphint">Scroll to zoom · drag to pan · hover for details · click to set a waypoint · right-click to clear</div>
+        </div>
         <div class="mapside">
           <h2>SOLMARA BAY</h2>
-          <p class="mapsub">Six districts on a sunny bay: towers, beach, harbour and hills.</p>
           ${obj ? `<div class="mapobj"><b>${obj.title}</b><span>${obj.text}</span></div>` : ''}
-          <div class="maplegend">${legend.map(([c, l, t]) => `<div><i style="background:${c}">${l}</i>${t}</div>`).join('')}</div>
-          <div class="mapstats"><span>Story <b>${done}/${MISSIONS.length}</b></span><span>Sun Shells <b>${world.missions.shellsFound.size}/12</b></span><span>Cash <b>$${Math.floor(world.money).toLocaleString('en-US')}</b></span></div>
+          <div class="people">${people.map(([icon, name, role, status]) => `<div class="person"><img class="${name === '???' ? 'unknown' : ''}" src="${hud.iconURL(icon)}"><div><b>${name}</b><span>${role}</span><em>${status}</em></div></div>`).join('')}</div>
+          <div class="maplegend">${legend.map(([icon, t]) => `<div><img src="${hud.iconURL(icon)}">${t}</div>`).join('')}</div>
+          <div class="mapstats"><span>Story <b>${done}/${MISSIONS.length}</b></span><span>Sun Shells <b>${world.missions.shellsFound.size}/12</b></span></div>
         </div></div>`,
       items: [{ label: 'Back', action: () => this.back() }],
-      after: (root) => world.hud.drawBigMap(root.querySelector('.bigmap')),
+      after: (root) => {
+        const view = new MapView(world, root.querySelector('.bigmap'), root.querySelector('.mapcard'));
+        this.mapView = view;
+        root.querySelectorAll('.maptools button').forEach((b) => b.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const act = b.dataset.act;
+          const S = view.canvas.width;
+          if (act === 'in') view.zoomAt(S / 2, S / 2, 1.4);
+          else if (act === 'out') view.zoomAt(S / 2, S / 2, 1 / 1.4);
+          else if (act === 'kai') { const at = world.where(); view.focus(at.x, at.z, Math.max(view.zoom, 2.5)); }
+          else world.clearWaypoint();
+          this.audio.ui('move');
+        }));
+      },
     });
   }
+
 
 
   stats(world) {

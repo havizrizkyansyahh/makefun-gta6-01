@@ -232,6 +232,19 @@ export class Hud {
       g.fillStyle = Math.floor(w.time * 2) % 2 ? 'rgba(255,60,60,0.22)' : 'rgba(80,120,255,0.22)';
       g.fill();
     }
+    // GPS route to the waypoint, drawn in map space so it turns with the map
+    const wp = w.waypoint;
+    if (wp && wp.route.length > 1) {
+      g.lineJoin = 'round';
+      g.lineCap = 'round';
+      for (const [width, color] of [[14, 'rgba(10,14,30,0.8)'], [8, '#c77dff']]) {
+        g.lineWidth = width / zoom;
+        g.strokeStyle = color;
+        g.beginPath();
+        wp.route.forEach((pt, i) => { const [mx, mz] = this.mapPoint(pt.x, pt.z); if (i) g.lineTo(mx, mz); else g.moveTo(mx, mz); });
+        g.stroke();
+      }
+    }
     g.restore();
 
     const toScreen = (x, z) => {
@@ -242,7 +255,7 @@ export class Hud {
       const s = Math.sin(rot);
       return [R + dx * c - dz * s, R + dx * s + dz * c];
     };
-    const dot = (x, z, color, size = 5, edge = false, label = null) => {
+    const dot = (x, z, color, size = 5, edge = false, label = null, icon = null) => {
       let [sx, sz] = toScreen(x, z);
       const dx = sx - R;
       const dz = sz - R;
@@ -251,6 +264,11 @@ export class Hud {
         if (!edge) return;
         sx = R + (dx / d) * (R - 10);
         sz = R + (dz / d) * (R - 10);
+      }
+      if (icon && this.icons && this.icons[icon]) {
+        const s2 = size * 3.6;
+        g.drawImage(this.icons[icon], sx - s2 / 2, sz - s2 / 2, s2, s2);
+        return;
       }
       g.beginPath();
       g.arc(sx, sz, size, 0, Math.PI * 2);
@@ -267,8 +285,11 @@ export class Hud {
         g.fillText(label, sx, sz + 0.5);
       }
     };
-    for (const b of w.missions.blips()) {
-      dot(b.x, b.z, b.color, b.kind === 'enemy' ? 4 : b.kind === 'place' ? 6.5 : 7, !!b.edge, b.label || null);
+    const blips = w.missions.blips();
+    if (wp) blips.push({ x: wp.x, z: wp.z, color: '#c77dff', kind: 'waypoint', icon: 'waypoint', edge: true });
+    for (const b of blips) {
+      const size = b.kind === 'enemy' ? 4 : b.kind === 'contact' || b.kind === 'target' ? 8 : b.minor ? 5 : 6.5;
+      dot(b.x, b.z, b.color, size, !!b.edge, b.label || null, b.icon || null);
     }
     for (const v of w.vehicles) {
       if (v.kind === 'police' && !v.dead) dot(v.pos.x, v.pos.z, Math.floor(w.time * 4) % 2 ? '#ff3b3b' : '#3b6bff', 4.5, w.police.stars > 0);
@@ -297,90 +318,17 @@ export class Hud {
     g.fillText('N', R + Math.cos(nAng) * (R - 13), R + Math.sin(nAng) * (R - 13));
   }
 
-  /** The whole-city map for the pause menu: districts, every blip, the player, north and scale. */
-  drawBigMap(canvas) {
-    const w = this.world;
-    const g = canvas.getContext('2d');
-    const mm = w.city.minimap;
-    const S = canvas.width;
-    const k = S / mm.size;
-    g.imageSmoothingQuality = 'high';
-    g.drawImage(mm.canvas, 0, 0, S, S);
-    const P = (x, z) => { const [a, b] = this.mapPoint(x, z); return [a * k, b * k]; };
-    // district names over the middle of their blocks
-    const sums = {};
-    for (const l of w.city.loops) {
-      const d = DISTRICTS[w.city.districtAt((l.x0 + l.x1) / 2, (l.z0 + l.z1) / 2)];
-      const s = sums[d.name] || (sums[d.name] = { x: 0, z: 0, n: 0, color: d.color });
-      s.x += (l.x0 + l.x1) / 2; s.z += (l.z0 + l.z1) / 2; s.n += 1;
-    }
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    for (const [name, s] of Object.entries(sums)) {
-      const [a, b] = P(s.x / s.n, s.z / s.n + (name === 'Palmline Beach' ? 40 : 0));
-      g.font = `italic 900 ${Math.round(S * 0.03)}px "Avenir Next Condensed", "Futura", sans-serif`;
-      g.lineWidth = 6;
-      g.strokeStyle = 'rgba(10,14,30,0.75)';
-      g.strokeText(name.toUpperCase(), a, b);
-      g.fillStyle = s.color;
-      g.fillText(name.toUpperCase(), a, b);
-    }
-    // the bay itself
-    g.font = `italic 700 ${Math.round(S * 0.026)}px "Avenir Next", sans-serif`;
-    g.fillStyle = 'rgba(255,255,255,0.75)';
-    g.fillText('S O L M A R A   B A Y', S * 0.5, S * 0.93);
-    // police
-    for (const v of w.vehicles) {
-      if (v.kind !== 'police' || v.dead) continue;
-      const [a, b] = P(v.pos.x, v.pos.z);
-      g.fillStyle = '#ff3b3b';
-      g.beginPath(); g.arc(a, b, 5, 0, Math.PI * 2); g.fill();
-    }
-    // blips: places, contacts, objectives, enemies
-    for (const bl of w.missions.blips()) {
-      const [a, b] = P(bl.x, bl.z);
-      const r = bl.kind === 'enemy' ? 5 : bl.kind === 'objective' ? 11 : 12;
-      g.beginPath(); g.arc(a, b, r + 2.5, 0, Math.PI * 2); g.fillStyle = 'rgba(10,14,30,0.85)'; g.fill();
-      g.beginPath(); g.arc(a, b, r, 0, Math.PI * 2); g.fillStyle = bl.color; g.fill();
-      if (bl.kind === 'objective') {
-        g.strokeStyle = bl.color; g.lineWidth = 3;
-        g.beginPath(); g.arc(a, b, r + 8, 0, Math.PI * 2); g.stroke();
-      }
-      if (bl.label) { g.fillStyle = '#111'; g.font = `bold ${Math.round(r * 1.2)}px sans-serif`; g.fillText(bl.label, a, b + 1); }
-    }
-    // Sun Shells still to find, as faint pink dots
-    for (const s of w.missions.shells) {
-      if (s.taken) continue;
-      const [a, b] = P(s.x, s.z);
-      g.fillStyle = 'rgba(255,150,190,0.8)';
-      g.beginPath(); g.arc(a, b, 3.5, 0, Math.PI * 2); g.fill();
-    }
-    // the player: a white arrow pointing the way Kai faces
-    const at = w.where();
-    const heading = w.player.vehicle ? w.player.vehicle.heading : w.player.heading;
-    const [a, c] = P(at.x, at.z);
-    g.save();
-    g.translate(a, c);
-    g.rotate(Math.atan2(Math.cos(heading), Math.sin(heading)) + Math.PI / 2);
-    g.beginPath();
-    g.moveTo(0, -16); g.lineTo(11, 12); g.lineTo(0, 6); g.lineTo(-11, 12); g.closePath();
-    g.fillStyle = '#ffffff'; g.fill();
-    g.lineWidth = 3; g.strokeStyle = '#111'; g.stroke();
-    g.restore();
-    // north arrow and scale bar
-    g.fillStyle = 'rgba(10,14,30,0.7)';
-    g.fillRect(S - 70, 16, 54, 64);
-    g.fillStyle = '#fff';
-    g.font = 'bold 20px sans-serif';
-    g.fillText('N', S - 43, 66);
-    g.beginPath(); g.moveTo(S - 43, 22); g.lineTo(S - 33, 48); g.lineTo(S - 53, 48); g.closePath(); g.fill();
-    const m200 = 200 * mm.scale * k;
-    g.fillStyle = 'rgba(10,14,30,0.7)';
-    g.fillRect(16, S - 46, m200 + 24, 30);
-    g.fillStyle = '#fff';
-    g.fillRect(28, S - 26, m200, 4);
-    g.font = 'bold 13px sans-serif';
-    g.fillText('200 m', 28 + m200 / 2, S - 36);
+  /** Portraits and pictograms (portraits.js), and their data URLs for HTML cards. */
+  setIcons(icons) {
+    this.icons = icons;
+    this.iconURLs = {};
   }
+
+  iconURL(key) {
+    if (!this.icons || !this.icons[key]) return '';
+    if (!this.iconURLs[key]) this.iconURLs[key] = this.icons[key].toDataURL();
+    return this.iconURLs[key];
+  }
+
 
 }

@@ -106,6 +106,21 @@ export class City {
     return this.nodeId(i, j);
   }
 
+  /** Shortest chain of road nodes from one node to another (breadth-first over the grid). */
+  route(from, to) {
+    const prev = new Map([[from, -1]]);
+    const queue = [from];
+    while (queue.length) {
+      const n = queue.shift();
+      if (n === to) break;
+      for (const m of this.nodes[n].links) if (!prev.has(m)) { prev.set(m, n); queue.push(m); }
+    }
+    if (!prev.has(to)) return [];
+    const out = [];
+    for (let n = to; n !== -1; n = prev.get(n)) out.push(n);
+    return out.reverse();
+  }
+
   /** A random point on a road segment: { a, b, t } with a, b node ids. */
   randomSegment(rng) {
     const a = rng.int(0, this.nodes.length - 1);

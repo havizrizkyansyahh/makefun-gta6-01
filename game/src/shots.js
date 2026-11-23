@@ -239,10 +239,20 @@ export async function stageShot(name, world, { menu, hud }) {
     const c = world.city.places.gunshop;
     p.place(c.x - 30, c.z + 12, -Math.PI / 2);
     run(world, input, 1.5);
+    // a waypoint up in Verde Hills, so the GPS route shows
+    const h = world.city.places.hospital;
+    world.setWaypoint(h.x + 6, h.z + 10);
     hud.show(false);
     menu.hide();
     menu.pause(world);
     menu.map(world);
+    // zoom in on the south of the city and hover over Nadia, to open her card
+    const view = menu.mapView;
+    const n = world.missions.contactMarker;
+    view.focus((p.pos.x + n.x) / 2 - 30, (p.pos.z + n.z) / 2 - 60, 1.75);
+    const [mx, my] = view.toScreen(n.x, n.z);
+    view.mouse = { x: mx, y: my };
+    await new Promise((r) => setTimeout(r, 400));
   }
   // only the play itself in the frame: no leftover title cards or notices
   hud.el.notes.innerHTML = '';

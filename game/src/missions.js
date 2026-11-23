@@ -557,23 +557,57 @@ export class Missions {
     } else if (!this.active) this.timer = null;
   }
 
-  /** Every marker the minimap should show. */
+  /**
+   * Every marker the maps should show, each with an icon (a portrait for people), a name and a
+   * line of description for the city map's info cards.
+   */
   blips() {
     const out = [];
     const pl = this.world.city.places;
-    for (const f of this.fixed) out.push({ x: f.marker.x, z: f.marker.z, color: pl[f.key].color, label: pl[f.key].blip, kind: 'place' });
-    if (this.contactMarker) out.push({ x: this.contactMarker.x, z: this.contactMarker.z, color: this.contactMarker.color, label: this.contactKey === 'nadia' ? 'N' : 'P', kind: 'contact', edge: true });
+    const PLACE_INFO = {
+      safehouse: { icon: 'house', title: "Kai's apartment", desc: 'Stand in the green marker and press E to save your game.' },
+      gunshop: { icon: 'gun', title: 'Coastline Arms', desc: 'Guns, ammunition, body armour and med kits.' },
+      courier: { icon: 'box', title: 'Bayline Couriers', desc: 'Courier runs: three parcels against the clock.' },
+    };
+    for (const f of this.fixed) {
+      const info = PLACE_INFO[f.key];
+      out.push({ x: f.marker.x, z: f.marker.z, color: pl[f.key].color, kind: 'place', icon: info.icon, title: info.title, desc: info.desc });
+    }
+    out.push({ x: pl.hospital.x, z: pl.hospital.z, color: pl.hospital.color, kind: 'place', icon: 'hospital', title: 'St. Amara Medical', desc: 'Where you wake up after being wasted.', minor: true });
+    out.push({ x: pl.precinct.x, z: pl.precinct.z, color: pl.precinct.color, kind: 'place', icon: 'police', title: 'Solmara Bay PD', desc: 'Where you are released after being busted.', minor: true });
+    if (this.contactMarker) {
+      const next = this.next();
+      const nadia = this.contactKey === 'nadia';
+      out.push({
+        x: this.contactMarker.x, z: this.contactMarker.z, color: this.contactMarker.color, kind: 'contact', edge: true,
+        icon: this.contactKey, title: nadia ? 'Nadia Moreno' : 'Auntie Pearl',
+        desc: `${nadia ? "Kai's sister, at her Sol y Sal food truck" : 'Owner of Spin City Laundry'}. Next story mission: ${next ? next.title : ''}.`,
+      });
+    }
     if (this.active) {
       const c = this.active.ctx;
-      for (const m of c.markers) out.push({ x: m.x, z: m.z, color: '#ffd23f', kind: 'objective', edge: true });
-      for (const n of c.spawned) if (!n.dead) out.push({ x: n.pos.x, z: n.pos.z, color: '#ff4d4d', kind: 'enemy' });
-      for (const a of c.arrows) if (!a.entity.dead || a.entity.spec) out.push({ x: a.entity.pos.x, z: a.entity.pos.z, color: '#ff4d4d', kind: 'target', edge: true });
-      for (const p of c.pickups) if (!p.taken) out.push({ x: p.x, z: p.z, color: '#6dff8a', kind: 'objective', edge: true });
+      const step = this.active.def.steps[this.active.step];
+      for (const m of c.markers) out.push({ x: m.x, z: m.z, color: '#ffd23f', kind: 'objective', edge: true, icon: 'objective', title: this.active.def.title, desc: step ? step.text : '' });
+      for (const n of c.spawned) {
+        if (n.dead) continue;
+        if (n.boss) out.push({ x: n.pos.x, z: n.pos.z, color: '#ff4d4d', kind: 'target', edge: true, icon: 'halo', title: 'Halo Calder', desc: 'Boss of the Glass Saints.' });
+        else out.push({ x: n.pos.x, z: n.pos.z, color: '#ff4d4d', kind: 'enemy', title: 'Glass Saint', desc: 'Armed and hostile.' });
+      }
+      for (const a of c.arrows) {
+        if (a.entity.dead && !a.entity.spec) continue;
+        if (a.entity.boss) continue;
+        out.push({ x: a.entity.pos.x, z: a.entity.pos.z, color: '#ff4d4d', kind: 'target', edge: true, title: a.entity.spec ? a.entity.spec.name : 'Target', desc: step ? step.text : '' });
+      }
+      for (const p of c.pickups) if (!p.taken) out.push({ x: p.x, z: p.z, color: '#6dff8a', kind: 'objective', edge: true, icon: 'objective', title: this.active.def.title, desc: step ? step.text : '' });
     }
     out.push(...this.race.blips());
-    if (this.side && this.side.marker) out.push({ x: this.side.marker.x, z: this.side.marker.z, color: this.side.kind === 'taxi' ? '#ffd23f' : '#4fc3f7', kind: 'objective', edge: true });
+    if (this.side && this.side.marker) {
+      const taxi = this.side.kind === 'taxi';
+      out.push({ x: this.side.marker.x, z: this.side.marker.z, color: taxi ? '#ffd23f' : '#4fc3f7', kind: 'objective', edge: true, icon: 'objective', title: taxi ? 'Taxi fare' : 'Courier drop', desc: taxi ? 'Pick up or drop off your passenger.' : 'Deliver the parcel here.' });
+    }
     return out;
   }
+
 
   objective() {
     const race = this.race && this.race.objective();
@@ -589,7 +623,7 @@ export class Missions {
     const next = this.next();
     if (next) {
       const who = next.giver === 'nadia' ? 'Nadia at the Sol y Sal truck' : 'Pearl at Spin City Laundry';
-      return { title: 'Story', text: `Meet ${who} (${next.giver === 'nadia' ? 'N' : 'P'} on the map).` };
+      return { title: 'Story', text: `Meet ${who}: follow her portrait on the map.` };
     }
     return null;
   }

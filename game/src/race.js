@@ -159,10 +159,10 @@ export class StreetRace {
   }
 
   blips() {
-    const out = [{ x: this.start.x, z: this.start.z, color: '#ff9f1c', label: 'R', kind: 'place' }];
+    const out = [{ x: this.start.x, z: this.start.z, color: '#ff9f1c', kind: 'place', icon: 'flag', title: 'Bayside Run', desc: 'Street race: drive into the chequered marker and press E. Prizes $2,000 / $900 / $400.' }];
     if (this.active) {
-      out.push({ x: this.active.cp.x, z: this.active.cp.z, color: '#ff9f1c', kind: 'objective', edge: true });
-      for (const car of this.active.rivals) out.push({ x: car.pos.x, z: car.pos.z, color: '#ffffff', kind: 'enemy' });
+      out.push({ x: this.active.cp.x, z: this.active.cp.z, color: '#ff9f1c', kind: 'objective', edge: true, icon: 'flag', title: 'Next checkpoint', desc: 'Bayside Run' });
+      for (const car of this.active.rivals) out.push({ x: car.pos.x, z: car.pos.z, color: '#ffffff', kind: 'enemy', title: 'Rival racer', desc: car.spec.name });
     }
     return out;
   }

@@ -9,6 +9,7 @@ import { Hud } from './hud.js';
 import { Menu } from './menu.js';
 import { CAMERA } from './config.js';
 import { PostFX } from './postfx.js';
+import { makeIcons } from './portraits.js';
 
 const canvas = document.getElementById('game');
 const params = new URLSearchParams(location.search);
@@ -26,6 +27,7 @@ const hud = new Hud(document.getElementById('hud'));
 const menu = new Menu(document.getElementById('menu'), audio);
 const input = new Input(canvas);
 const world = new World(renderer, audio, hud, Number(params.get('seed')) || 7);
+hud.setIcons(makeIcons(renderer));
 const pixelRatio = renderer.getPixelRatio();
 world.post = new PostFX(renderer);
 world.post.setSize(innerWidth, innerHeight, pixelRatio);
