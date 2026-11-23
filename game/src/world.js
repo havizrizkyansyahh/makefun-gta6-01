@@ -5,6 +5,8 @@
 import * as THREE from '../vendor/three.module.min.js';
 import { City, PIER } from './city.js';
 import { Signals } from './signals.js';
+import { Weather } from './weather.js';
+import { SkidMarks } from './skids.js';
 import { Sky } from './sky.js';
 import { Effects } from './effects.js';
 import { Player } from './player.js';
@@ -12,7 +14,7 @@ import { Traffic } from './traffic.js';
 import { Police } from './police.js';
 import { Missions } from './missions.js';
 import { CameraRig } from './camera.js';
-import { collideVehicles, Vehicle } from './vehicles.js';
+import { collideVehicles, Vehicle, headlightGlow } from './vehicles.js';
 import { Pickup } from './markers.js';
 import { STATIONS } from './audio.js';
 import { CITY, DAY_SECONDS, START_HOUR, SAVE_KEY, PLAYER } from './config.js';
@@ -31,6 +33,14 @@ export class World {
     this.difficulty = 1;
     this.city = new City(this.scene, seed);
     this.signals = new Signals(this.scene, this.city);
+    this.weather = new Weather(this);
+    this.skids = new SkidMarks(this.scene);
+    // two real spot lights ride along on whatever the player drives after dark
+    this.headlights = [0, 1].map(() => {
+      const l = new THREE.SpotLight('#fff1d0', 0, 70, 0.5, 0.55, 1.3);
+      this.scene.add(l, l.target);
+      return l;
+    });
     this.sky = new Sky(this.scene);
     this.fx = new Effects(this.scene);
     this.vehicles = [];
@@ -72,6 +82,12 @@ export class World {
     // a starter car parked on the boulevard by the truck
     const n = this.city.places.nadia;
     const seg = { a: this.city.nearestNode(n.x - 40, n.z - 20), b: this.city.nearestNode(n.x + 50, n.z - 20), t: 0.5 };
+    // two speedboats tied up at the end of the pier
+    for (const side of [-1, 1]) {
+      const boat = new Vehicle(this.scene, 'marisol', side > 0 ? '#f4f4f0' : '#1d3557', PIER.x + side * 6.5, PIER.z1 - 12, 0);
+      boat.kind = 'parked';
+      this.vehicles.push(boat);
+    }
     // a bike on the sand by the truck, for anyone who prefers two wheels
     const bike = new Vehicle(this.scene, 'sprint', '#ffb703', n.x + 9, n.z - 4, Math.PI / 2);
     bike.kind = 'parked';
@@ -224,10 +240,11 @@ export class World {
     for (const v of this.vehicles) {
       if (v.ai) v.ai.update(dt);
       const asleep = !v.ai && v.driver === null && v.speed < 0.05 && v.health > 0 && v !== p.vehicle;
-      if (!asleep || v.kind === 'abandoned') v.update(dt, this.city, this.events);
+      if (!asleep || v.kind === 'abandoned' || v.spec.body === 'boat') v.update(dt, this.city, this.events, this);
       v.lights(this.time, this.sky.night);
     }
     collideVehicles(this.vehicles, this.events);
+    this.skids.update(this.vehicles, this.city);
     this.handleVehicleEvents();
     this.vehicleHits(dt);
     this.wrecks(dt);
@@ -243,6 +260,10 @@ export class World {
 
     const at = this.where();
     this.sky.update(this.hour, at);
+    this.weather.update(dt);
+    this.weather.applyToSky(this.sky, this.scene);
+    this.city.setWet(this.weather.wet);
+    this.lightsOn();
     this.city.syncSky(this.sky.uniforms);
     this.city.update(this.time, this.sky.night);
     this.rig.update(dt, this, input);
@@ -318,8 +339,11 @@ export class World {
           if (d < v.radius + 0.35) {
             n.pos.x += v.vel.x * 0.08 + (n.pos.x - c.x) * 0.5;
             n.pos.z += v.vel.z * 0.08 + (n.pos.z - c.z) * 0.5;
+            // knocked flying by the bonnet
+            n.knockVel = { x: v.vel.x * 0.75, z: v.vel.z * 0.75, y: 2.5 + sp * 0.18 };
             if (v === p.vehicle) this.playerHitNpc(n, sp * 6);
             else n.hurt(sp * 6, v.pos);
+            n.knockVel = null;
             this.audio.impact();
             break;
           }
@@ -368,7 +392,11 @@ export class World {
     if (p.vehicle === v) p.exitVehicle();
     for (const n of this.npcs) {
       const d = Math.hypot(n.pos.x - v.pos.x, n.pos.z - v.pos.z);
-      if (d < 7) n.hurt(200 * (1 - d / 7) + 20, v.pos);
+      if (d < 7) {
+        const k = 9 * (1 - d / 7) + 2;
+        n.knockVel = { x: ((n.pos.x - v.pos.x) / (d || 1)) * k, z: ((n.pos.z - v.pos.z) / (d || 1)) * k, y: 4 + k * 0.4 };
+        n.hurt(200 * (1 - d / 7) + 20, v.pos);
+      }
     }
     for (const o of this.vehicles) {
       if (o === v) continue;
@@ -378,6 +406,23 @@ export class World {
     const d = Math.hypot(p.pos.x - v.pos.x, p.pos.z - v.pos.z);
     if (d < 7) this.hurtPlayer(110 * (1 - d / 7), v);
     if (v.mission === true || v.kind === 'police') this.police.report('shots', v.pos.x, v.pos.z, false);
+  }
+
+  /** Headlights: beams on the road for every car, real light from the player's own. */
+  lightsOn() {
+    const night = Math.min(1, this.sky.night + this.weather.rain * 0.5);
+    headlightGlow.opacity = Math.max(0, night - 0.35) / 0.65 * 0.45;
+    const v = this.player.vehicle;
+    this.headlights.forEach((l, i) => {
+      if (!v || v.dead || night < 0.4) { l.intensity = 0; return; }
+      const side = (i === 0 ? 1 : -1) * (v.spec.body === 'bike' ? 0 : v.spec.wid * 0.3);
+      const fx = v.fx; const fz = v.fz;
+      const x = v.pos.x + fx * v.halfLen + Math.cos(v.heading) * side;
+      const z = v.pos.z + fz * v.halfLen - Math.sin(v.heading) * side;
+      l.position.set(x, v.y + 0.75, z);
+      l.target.position.set(x + fx * 20, 0, z + fz * 20);
+      l.intensity = (night - 0.4) / 0.6 * (v.spec.body === 'bike' && i === 1 ? 0 : 170);
+    });
   }
 
   /** Skip drawing cars and people the fog would hide anyway. */

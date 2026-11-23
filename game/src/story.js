@@ -203,6 +203,126 @@ export const MISSIONS = [
     ],
   },
   {
+    id: 'paper-trail',
+    title: 'Paper Trail',
+    giver: 'pearl',
+    reward: 5000,
+    intro: [
+      ['pearl', 'Dex kept books. Every payoff, every cop on the take, in one ledger.'],
+      ['pearl', 'His bookkeeper is running it out of town on a yellow Sprint. Do not let that ledger leave Solmara Bay.'],
+    ],
+    steps: [
+      {
+        text: "Run down the bookkeeper's motorbike.",
+        enter: (ctx) => {
+          const v = ctx.spawnFleeing('sprint', 130);
+          v.parts.paint.color.set('#ffd23f');
+          v.health = 40;
+          ctx.data.bike = v;
+          ctx.arrowOn(v, '#ff4d4d');
+          ctx.say([['kai', 'Yellow bike, heading for the hills. I see him.']]);
+        },
+        update: (ctx) => {
+          const v = ctx.data.bike;
+          if (v.health <= 0) return true;
+          if (ctx.distTo(v.pos) > 330) return ctx.fail('The bookkeeper got away.');
+          return false;
+        },
+      },
+      {
+        text: 'Grab the ledger.',
+        enter: (ctx) => {
+          ctx.clearArrows();
+          const v = ctx.data.bike;
+          ctx.data.ledger = ctx.pickup('cash', v.pos.x + 2, v.pos.z + 1.5);
+        },
+        update: (ctx) => ctx.data.ledger.taken,
+      },
+      {
+        text: 'Lose the cops.',
+        enter: (ctx) => { ctx.world.police.set(2); ctx.say([['radio', 'Traffic collision with a motorcyclist. Units respond.']]); },
+        update: (ctx) => ctx.world.police.stars === 0,
+      },
+      {
+        text: 'Bring the ledger to Pearl.',
+        enter: (ctx) => { ctx.data.m = ctx.markAt('pearl'); },
+        update: (ctx) => ctx.data.m.inside(ctx.px, ctx.pz, 2),
+      },
+      {
+        text: 'Talk to Pearl.',
+        enter: (ctx) => ctx.say([
+          ['pearl', 'Captain Hollis, Sergeant Vey, half the harbour board. All bought and paid for by Halo Calder.'],
+          ['pearl', 'With this, nobody in a uniform will come to his rescue.'],
+        ]),
+        update: (ctx) => ctx.talkDone(),
+      },
+    ],
+  },
+  {
+    id: 'deep-water',
+    title: 'Deep Water',
+    giver: 'nadia',
+    reward: 6000,
+    intro: [
+      ['nadia', 'The fishermen say the Saints meet a boat every night, way past the buoys. Guns in, cash out.'],
+      ['nadia', 'There are speedboats tied up at the end of the pier. Go take it from them.'],
+    ],
+    steps: [
+      {
+        text: 'Take a speedboat from the end of the pier.',
+        enter: (ctx) => { ctx.data.m = ctx.markAt('pierEnd'); },
+        update: (ctx) => !!ctx.world.player.vehicle && ctx.world.player.vehicle.spec.body === 'boat',
+      },
+      {
+        text: 'Take out the Saints on the drop barge',
+        enter: (ctx) => {
+          const city = ctx.world.city;
+          const bx = ctx.place('pierEnd').x + 150;
+          const bz = ctx.place('pierEnd').z + 260;
+          ctx.data.barge = city.platforms.find((p) => p.tag === 'drop') || Object.assign(city.addPlatform(bx, bz, 14, 9), { tag: 'drop' });
+          const b = ctx.data.barge;
+          const cx = (b.x0 + b.x1) / 2;
+          const cz = (b.z0 + b.z1) / 2;
+          ctx.data.gang = [[-4, -2], [3, 2.5], [-1, 3], [4, -2.5]].map(([ox, oz]) => {
+            const g = ctx.spawnGang(cx + ox, cz + oz, 1, 0.01)[0];
+            g.pos.x = cx + ox; g.pos.z = cz + oz; g.anchored = true; g.alertRange = 70;
+            return g;
+          });
+          ctx.arrowOn({ pos: { x: cx, z: cz }, y: 1, dead: false }, '#ff4d4d');
+          ctx.world.hud.notify('Shoot from the boat: aim with the mouse and click (drive-by).');
+        },
+        update: (ctx) => ctx.countDead(ctx.data.gang, 'Take out the Saints on the drop barge'),
+      },
+      {
+        text: 'Grab the cargo from the barge.',
+        enter: (ctx) => {
+          ctx.clearArrows();
+          const b = ctx.data.barge;
+          ctx.data.cargo = ctx.pickup('cash', (b.x0 + b.x1) / 2, b.z0 + 0.6);
+        },
+        update: (ctx) => ctx.data.cargo.taken,
+      },
+      {
+        text: 'Lose the cops and the chopper.',
+        enter: (ctx) => { ctx.world.police.set(3); ctx.say([['radio', 'Shots fired on the water. Air unit, light them up.']]); },
+        update: (ctx) => ctx.world.police.stars === 0,
+      },
+      {
+        text: 'Bring the cargo to Nadia on the beach.',
+        enter: (ctx) => { ctx.data.m = ctx.markAt('nadia'); },
+        update: (ctx) => ctx.data.m.inside(ctx.px, ctx.pz, 2),
+      },
+      {
+        text: 'Talk to Nadia.',
+        enter: (ctx) => ctx.say([
+          ['nadia', 'You came in off the sea with a helicopter on your back. Mamá would have killed you.'],
+          ['kai', 'Mamá would have helped.'],
+        ]),
+        update: (ctx) => ctx.talkDone(),
+      },
+    ],
+  },
+  {
     id: 'glass-houses',
     title: 'Glass Houses',
     giver: 'pearl',

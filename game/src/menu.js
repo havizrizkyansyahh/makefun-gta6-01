@@ -176,7 +176,7 @@ export class Menu {
     this.push({
       kind: 'map',
       title: 'SOLMARA BAY',
-      body: '<canvas class="bigmap" width="760" height="760"></canvas><div class="legend"><span style="--c:#ffb000">N Nadia</span><span style="--c:#ff5fa2">P Pearl</span><span style="--c:#52d273">H Save</span><span style="--c:#ff7043">G Guns</span><span style="--c:#4fc3f7">C Courier</span><span style="--c:#ffd23f">Objective</span></div>',
+      body: '<canvas class="bigmap" width="760" height="760"></canvas><div class="legend"><span style="--c:#ffb000">N Nadia</span><span style="--c:#ff5fa2">P Pearl</span><span style="--c:#52d273">H Save</span><span style="--c:#ff7043">G Guns</span><span style="--c:#4fc3f7">C Courier</span><span style="--c:#ff9f1c">R Race</span><span style="--c:#ffd23f">Objective</span></div>',
       items: [{ label: 'Back', action: () => this.back() }],
       after: (root) => world.hud.drawBigMap(root.querySelector('.bigmap')),
     });

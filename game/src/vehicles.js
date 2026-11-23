@@ -4,6 +4,7 @@
 import * as THREE from '../vendor/three.module.min.js';
 import { clamp, damp, wrapAngle } from './rng.js';
 import { mergeParts, mat4 } from './geometry.js';
+import { buildBoatModel, boatPhysics } from './boats.js';
 
 /** The city's own makes. len/wid/hgt in metres; power m/s^2, top m/s, grip, turn rad/s. */
 export const MODELS = {
@@ -16,6 +17,7 @@ export const MODELS = {
   bayrunner: { name: 'Bayrunner 70', body: 'muscle', len: 4.9, wid: 2.0, hgt: 1.25, power: 16, top: 52, grip: 6.2, turn: 2.0, mass: 1.35, colors: ['#fb8500', '#219ebc', '#8338ec', '#000000'] },
   cruiser: { name: 'SBPD Interceptor', body: 'sedan', len: 4.9, wid: 1.95, hgt: 1.42, power: 16, top: 54, grip: 7.2, turn: 2.1, mass: 1.35, colors: ['#f4f4f4'], police: true },
   sprint: { name: 'Sprint 250', body: 'bike', len: 2.1, wid: 0.8, hgt: 1.1, power: 15, top: 50, grip: 8.5, turn: 2.8, mass: 0.45, colors: ['#e63946', '#1d3557', '#ffb703', '#2ec4b6', '#f1faee'] },
+  marisol: { name: 'Marisol 22', body: 'boat', len: 6.2, wid: 2.3, hgt: 1.7, power: 12, top: 30, grip: 2.4, turn: 1.15, mass: 1.6, colors: ['#f4f4f0', '#1d3557', '#e63946'] },
   halcyon: { name: 'Halcyon GT-R', body: 'coupe', len: 4.6, wid: 2.0, hgt: 1.1, power: 21, top: 64, grip: 8.2, turn: 2.35, mass: 1.25, colors: ['#bde0fe'] },
 };
 
@@ -46,6 +48,44 @@ const shared = {
 };
 
 /** Extrude a side profile (u along the car, front positive; v up) across the car's width. */
+/** Windscreen after a few crashes: spider-web cracks on tinted glass. */
+function crackTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = '#1a2633';
+  g.fillRect(0, 0, 256, 256);
+  g.strokeStyle = 'rgba(230,240,255,0.75)';
+  for (const [cx, cy] of [[90, 110], [180, 160]]) {
+    for (let k = 0; k < 14; k += 1) {
+      const a = (k / 14) * Math.PI * 2 + Math.random() * 0.3;
+      let x = cx;
+      let y = cy;
+      g.lineWidth = 1.5;
+      g.beginPath();
+      g.moveTo(x, y);
+      for (let s = 0; s < 6; s += 1) {
+        x += Math.cos(a + (Math.random() - 0.5) * 0.6) * 14;
+        y += Math.sin(a + (Math.random() - 0.5) * 0.6) * 14;
+        g.lineTo(x, y);
+      }
+      g.stroke();
+    }
+    for (let r = 12; r < 60; r += 14) {
+      g.lineWidth = 0.8;
+      g.beginPath();
+      g.arc(cx, cy, r + Math.random() * 4, 0, Math.PI * 2);
+      g.stroke();
+    }
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(0.5, 0.5);
+  return t;
+}
+const crackedGlass = new THREE.MeshPhysicalMaterial({ map: crackTexture(), roughness: 0.35, metalness: 0.1, clearcoat: 0.6 });
+
 function extrudeProfile(shape, width, bevel) {
   const g = new THREE.ExtrudeGeometry(shape, {
     depth: Math.max(0.01, width - bevel * 2), bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel * 0.8, bevelSegments: 4, curveSegments: 12,
@@ -119,6 +159,36 @@ function bodyGeometry(spec) {
 }
 
 const modelCache = new Map();
+
+/** Headlight beams painted on the road ahead of every car, faded in after dark. */
+function beamTexture() {
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 256;
+  const g = c.getContext('2d');
+  const grad = g.createLinearGradient(0, 256, 0, 0);
+  grad.addColorStop(0, 'rgba(255,240,200,0.95)');
+  grad.addColorStop(0.5, 'rgba(255,235,190,0.35)');
+  grad.addColorStop(1, 'rgba(255,230,180,0)');
+  g.fillStyle = grad;
+  g.beginPath();
+  g.moveTo(44, 256); g.lineTo(84, 256); g.lineTo(128, 0); g.lineTo(0, 0);
+  g.closePath();
+  g.fill();
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+export const headlightGlow = new THREE.MeshBasicMaterial({ map: beamTexture(), transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending });
+const beamGeo = new THREE.PlaneGeometry(1, 1);
+beamGeo.rotateX(-Math.PI / 2);
+beamGeo.translate(0, 0, 0.5);
+function addBeam(body, z, width) {
+  const m = new THREE.Mesh(beamGeo, headlightGlow);
+  m.scale.set(width, 1, 13);
+  m.position.set(0, 0.06, z);
+  m.renderOrder = 2;
+  body.add(m);
+}
 
 /**
  * Every static part of a make, merged by material once and shared by all cars of that make:
@@ -243,6 +313,7 @@ function buildBike(spec, color) {
     body.add(pivot);
     wheels.push({ pivot, spin, front });
   }
+  addBeam(body, 1.0, 2.2);
   const driver = new THREE.Group();
   driver.visible = false;
   body.add(driver);
@@ -251,6 +322,7 @@ function buildBike(spec, color) {
 
 function buildModel(spec, color) {
   if (spec.body === 'bike') return buildBike(spec, color);
+  if (spec.body === 'boat') return buildBoatModel(spec, color);
   const root = new THREE.Group();
   const body = new THREE.Group();
   root.add(body);
@@ -266,8 +338,9 @@ function buildModel(spec, color) {
     parent.add(m);
     return m;
   };
-  add(parts.paint, paint).receiveShadow = true;
-  add(g.cabin, shared.glass);
+  const paintMesh = add(parts.paint, paint);
+  paintMesh.receiveShadow = true;
+  const glassMesh = add(g.cabin, shared.glass);
   add(parts.trim, trimMat);
   add(parts.head, head);
   add(parts.tail, tail);
@@ -296,10 +369,11 @@ function buildModel(spec, color) {
     root.add(pivot);
     wheels.push({ pivot, spin, front });
   }
+  addBeam(body, spec.len / 2, spec.wid * 2.6);
   const driver = add(parts.driver, driverMat);
   driver.position.set(W * 0.22, g.b + g.deck + 0.05, (g.cr0 + g.cf0) / 2 + 0.1);
   driver.visible = false;
-  return { root, body, wheels, paint, head, tail, sirens, driver };
+  return { root, body, wheels, paint, head, tail, sirens, driver, paintMesh, glassMesh };
 }
 
 let nextId = 1;
@@ -350,7 +424,8 @@ export class Vehicle {
     ];
   }
 
-  update(dt, city, events) {
+  update(dt, city, events, world) {
+    if (this.spec.body === 'boat') { boatPhysics(this, dt, world); return; }
     const s = this.spec;
     const inp = this.dead ? { throttle: 0, steer: 0, handbrake: true } : this.input;
     const fx = this.fx;
@@ -422,6 +497,8 @@ export class Vehicle {
         const impact = -vn;
         if (impact > 5) {
           this.damage((impact - 5) * 2.4);
+          // dent the panel that hit: the point on the body facing the wall
+          this.dentWorld(this.pos.x - nx * this.radius * 2, this.pos.z - nz * this.radius * 2, (impact - 5) * 0.025);
           if (events) events.push({ type: 'crash', vehicle: this, impact });
         }
       }
@@ -440,6 +517,45 @@ export class Vehicle {
   damage(amount) {
     if (this.dead) return;
     this.health = Math.max(0, this.health - amount * (1 - (this.armor || 0)));
+    const p = this.parts;
+    // the windscreen cracks once a car has taken a beating
+    if (this.health < 55 && p.glassMesh && p.glassMesh.material !== crackedGlass) p.glassMesh.material = crackedGlass;
+  }
+
+  /**
+   * Push the body panels in around a world point, deforming this car's own copy of its body:
+   * crumpled corners and caved-in doors that stay for as long as the car does.
+   */
+  dentWorld(wx, wz, strength) {
+    const p = this.parts;
+    if (!p.paintMesh || this.spec.body === 'bike' || strength <= 0.005) return;
+    if (!this.ownBody) {
+      p.paintMesh.geometry = p.paintMesh.geometry.clone();
+      this.ownBody = true;
+      this.dentTotal = 0;
+    }
+    if (this.dentTotal > 1.6) return;
+    this.dentTotal += strength;
+    const c = Math.cos(this.heading);
+    const s = Math.sin(this.heading);
+    const lx = (wx - this.pos.x) * c - (wz - this.pos.z) * s;
+    const lz = (wx - this.pos.x) * s + (wz - this.pos.z) * c;
+    const pos = p.paintMesh.geometry.attributes.position;
+    const depth = Math.min(0.35, strength);
+    for (let i = 0; i < pos.count; i += 1) {
+      const x = pos.getX(i);
+      const y = pos.getY(i);
+      const z = pos.getZ(i);
+      const d = Math.hypot(x - lx, z - lz);
+      if (d > 1.2) continue;
+      const f = (1 - d / 1.2) ** 2 * depth;
+      const inward = Math.hypot(x, z) || 1;
+      pos.setXYZ(i, x - (x / inward) * f, y - f * 0.25 * Math.sin(x * 9 + z * 7), z - (z / inward) * f);
+    }
+    pos.needsUpdate = true;
+    p.paintMesh.geometry.computeVertexNormals();
+    // a hard knock on the nose breaks the headlights
+    if (lz > this.halfLen * 0.6 && strength > 0.12) this.headBroken = true;
   }
 
   /** Called by the world when a burning wreck goes up. */
@@ -454,6 +570,11 @@ export class Vehicle {
 
   sync(dt = 0) {
     const p = this.parts;
+    if (this.spec.body === 'boat') {
+      this.mesh.position.set(this.pos.x, this.y, this.pos.z);
+      this.mesh.rotation.y = this.heading;
+      return;
+    }
     this.mesh.position.set(this.pos.x, this.y, this.pos.z);
     this.mesh.rotation.y = this.heading;
     // body roll and pitch sell the weight
@@ -474,7 +595,7 @@ export class Vehicle {
   lights(time, night) {
     const p = this.parts;
     if (this.dead) return;
-    p.head.emissiveIntensity = 0.3 + night * 2.5;
+    p.head.emissiveIntensity = this.headBroken ? 0 : 0.3 + night * 2.5;
     const braking = this.input.throttle < 0 && this.forward > 0.5;
     p.tail.emissiveIntensity = braking ? 2.5 : 0.4 + night * 0.8;
     if (p.sirens) {
@@ -488,7 +609,8 @@ export class Vehicle {
   remove() {
     this.scene.remove(this.mesh);
     this.mesh.traverse((o) => {
-      if (o.isMesh && o.material && !Object.values(shared).includes(o.material) && ![wheelMat, trimMat, driverMat].includes(o.material)) o.material.dispose();
+      if (o.isMesh && o.material && !Object.values(shared).includes(o.material) && ![wheelMat, trimMat, driverMat, crackedGlass, headlightGlow].includes(o.material)) o.material.dispose();
+      if (o.isMesh && this.ownBody && o === this.parts.paintMesh) o.geometry.dispose();
     });
   }
 }
@@ -533,6 +655,10 @@ export function collideVehicles(list, events) {
             B.heading += (Math.random() - 0.5) * Math.min(0.25, -rel * 0.012);
             const impact = -rel;
             if (impact > 4) {
+              const cx = (p.x + q.x) / 2;
+              const cz = (p.z + q.z) / 2;
+              A.dentWorld(cx, cz, (impact - 4) * 0.02);
+              B.dentWorld(cx, cz, (impact - 4) * 0.02);
               A.damage((impact - 4) * 1.6);
               B.damage((impact - 4) * 1.6);
               events.push({ type: 'carhit', a: A, b: B, impact, x: (p.x + q.x) / 2, z: (p.z + q.z) / 2 });

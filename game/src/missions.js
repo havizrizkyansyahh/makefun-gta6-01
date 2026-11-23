@@ -3,6 +3,7 @@
 // and cars, counters), and pay out or fail. Beside them: courier runs from Bayline Couriers, the
 // Coastline Arms counter, saving at Kai's apartment, and twelve Sun Shells hidden in the city.
 import { MISSIONS, CAST } from './story.js';
+import { StreetRace } from './race.js';
 import { Marker, TargetArrow, Pickup } from './markers.js';
 import { Npc } from './npc.js';
 import { Vehicle, MODELS } from './vehicles.js';
@@ -37,6 +38,7 @@ export class Missions {
     this.timer = null;
     this.fixed = [];
     this.setupWorld();
+    this.race = new StreetRace(world);
   }
 
   // ------------------------------------------------------------ static places
@@ -497,7 +499,7 @@ export class Missions {
         const inside = this.contactMarker.inside(at.x, at.z, 0.5);
         if (!inside && !this.contactMarker.inside(at.x, at.z, 2)) this.armed = true;
         if (!this.armed && inside) w.hud.help('Step out of the marker and back in to start the next mission.');
-        else if (slow && inside && !this.side && w.police.stars === 0) this.start(next);
+        else if (slow && inside && !this.side && !this.race.active && w.police.stars === 0) this.start(next);
         else if (slow && this.contactMarker.inside(at.x, at.z, 0.5) && w.police.stars > 0) w.hud.help('Lose the cops before starting a mission.');
       }
     }
@@ -527,6 +529,8 @@ export class Missions {
         }
       }
     }
+
+    this.race.update(dt, input);
 
     // in a cab with nothing else going on: offer taxi work
     if (!this.side && !this.active && p.vehicle && p.vehicle.spec.taxi && !p.dead) {
@@ -566,11 +570,14 @@ export class Missions {
       for (const a of c.arrows) if (!a.entity.dead || a.entity.spec) out.push({ x: a.entity.pos.x, z: a.entity.pos.z, color: '#ff4d4d', kind: 'target', edge: true });
       for (const p of c.pickups) if (!p.taken) out.push({ x: p.x, z: p.z, color: '#6dff8a', kind: 'objective', edge: true });
     }
+    out.push(...this.race.blips());
     if (this.side && this.side.marker) out.push({ x: this.side.marker.x, z: this.side.marker.z, color: this.side.kind === 'taxi' ? '#ffd23f' : '#4fc3f7', kind: 'objective', edge: true });
     return out;
   }
 
   objective() {
+    const race = this.race && this.race.objective();
+    if (race) return race;
     if (this.active) {
       const step = this.active.def.steps[this.active.step];
       return { title: this.active.def.title, text: this.counter || (step ? step.text : '') };

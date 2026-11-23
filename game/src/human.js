@@ -38,6 +38,9 @@ const G = {
   belt: new THREE.TorusGeometry(0.168, 0.018, 6, 22),
   badge: new THREE.CircleGeometry(0.03, 10),
   collar: new THREE.TorusGeometry(0.075, 0.02, 6, 16),
+  skirt: lathe([[0.17, 0.08], [0.2, -0.05], [0.27, -0.42], [0.001, -0.42]]),
+  lens: new THREE.CapsuleGeometry(0.022, 0.028, 2, 8),
+  bag: new THREE.BoxGeometry(0.22, 0.26, 0.08),
 };
 
 const weaponMat = {
@@ -89,6 +92,8 @@ export class Human {
     hips.position.y = 0.98;
     body.add(hips);
     mesh([{ geo: G.pelvis, color: L.pants, matrix: M(0, 0, 0, 1, 1, 0.72) },
+      ...(L.skirt ? [{ geo: G.skirt, color: L.skirt, matrix: M(0, 0, 0, 1, 1, 0.8) }] : []),
+      ...(L.bag ? [{ geo: G.bag, color: L.bag, matrix: M(0.2, -0.12, 0.02, 1, 1, 1, 0, 0, 0.1) }] : []),
       ...(L.belt !== false ? [{ geo: G.belt, color: L.belt || '#2a2420', matrix: M(0, 0.07, 0, 1.02, 1, 0.74, Math.PI / 2) }] : [])], hips);
     const chest = new THREE.Group();
     chest.position.y = 0.08;
@@ -118,6 +123,10 @@ export class Human {
       { geo: G.brow, color: L.hair, matrix: M(-0.042, 0.245, 0.104, 1, 1, 1, 0, 0, Math.PI / 2 - 0.1) },
       { geo: G.mouth, color: '#7a3d35', matrix: M(0, 0.135, 0.105, 1, 1, 1, 0, 0, Math.PI / 2) },
     ];
+    if (L.glasses) {
+      face.push({ geo: G.lens, color: '#111418', matrix: M(0.04, 0.215, 0.112, 1, 1, 0.6, 0, 0, Math.PI / 2) });
+      face.push({ geo: G.lens, color: '#111418', matrix: M(-0.04, 0.215, 0.112, 1, 1, 0.6, 0, 0, Math.PI / 2) });
+    }
     if (L.cap) {
       face.push({ geo: G.capTop, color: L.cap, matrix: M(0, 0.25, -0.005, 0.96, 0.8, 1) });
       face.push({ geo: G.brim, color: L.cap, matrix: M(0, 0.262, 0.09, 1, 1, 1.25, 0, -Math.PI / 2) });
@@ -147,12 +156,13 @@ export class Human {
       const hip = new THREE.Group();
       hip.position.set(side * 0.095, -0.06, 0);
       hips.add(hip);
-      mesh([{ geo: G.thigh, color: L.pants, matrix: M(0, -0.21, 0) }], hip);
+      // a skirt or dress shows bare legs; shorts stop above the knee
+      mesh([{ geo: G.thigh, color: L.skirt ? L.skin : L.pants, matrix: M(0, -0.21, 0) }], hip);
       const knee = new THREE.Group();
       knee.position.y = -0.44;
       hip.add(knee);
       mesh([
-        { geo: G.shin, color: L.pants, matrix: M(0, -0.2, 0) },
+        { geo: G.shin, color: L.skirt || L.shorts ? L.skin : L.pants, matrix: M(0, -0.2, 0) },
         { geo: G.shoe, color: L.shoes || '#222222', matrix: M(0, -0.43, 0.05, 1.1, 1, 0.75, Math.PI / 2) },
       ], knee);
       return { shoulder, elbow, hip, knee };
@@ -203,17 +213,29 @@ export class Human {
     L.elbow.rotation.x = R.elbow.rotation.x = -0.12;
 
     if (state === 'dead') {
-      this.fall = Math.min(1, this.fall + dt * 3);
+      // a loose, ragdoll-like sprawl: every body lands a little differently, and a hard
+      // knock (speed = tumble rate) rolls it over before it settles
+      if (!this.sprawl) this.sprawl = Array.from({ length: 10 }, () => Math.random() * 2 - 1);
+      const r = this.sprawl;
+      this.fall = Math.min(1, this.fall + dt * (3 + speed * 0.5));
+      this.roll = (this.roll || 0) + speed * dt;
       const f = this.fall;
-      this.body.rotation.x = -f * Math.PI / 2;
+      this.body.rotation.set(-f * Math.PI / 2 - this.roll, r[0] * 0.4 * f, r[1] * 0.35 * f);
       this.body.position.y = f * 0.16;
       this.body.position.z = -f * 0.25;
-      L.shoulder.rotation.z = f * 1.3; R.shoulder.rotation.z = -f * 1.1;
-      L.elbow.rotation.x = -f * 0.6;
-      L.hip.rotation.x = -f * 0.15; R.knee.rotation.x = f * 0.6; R.hip.rotation.z = -f * 0.2;
-      this.neck.rotation.y = f * 0.6;
+      L.shoulder.rotation.set(r[2] * 1.2 * f, 0, f * (1.0 + r[3] * 0.8));
+      R.shoulder.rotation.set(r[4] * 1.2 * f, 0, -f * (1.0 + r[5] * 0.8));
+      L.elbow.rotation.x = -f * (0.4 + Math.abs(r[6]) * 1.2);
+      R.elbow.rotation.x = -f * (0.3 + Math.abs(r[7]) * 1.0);
+      L.hip.rotation.set(-f * (0.1 + r[8] * 0.4), 0, f * 0.15);
+      R.hip.rotation.set(-f * (0.1 - r[8] * 0.3), 0, -f * (0.1 + Math.abs(r[9]) * 0.3));
+      L.knee.rotation.x = f * Math.abs(r[9]) * 1.2;
+      R.knee.rotation.x = f * (0.3 + Math.abs(r[3]) * 0.9);
+      this.neck.rotation.set(r[1] * 0.3 * f, f * 0.6 * r[0], 0);
       return;
     }
+    this.sprawl = null;
+    this.roll = 0;
     this.fall = 0;
     if (state === 'sit') {
       L.hip.rotation.x = R.hip.rotation.x = -1.45;
@@ -296,10 +318,16 @@ export class Human {
 /** A random civilian look from the city palette, using rng for repeatable crowds. */
 export function civilianLook(rng) {
   const female = rng.chance(0.5);
+  const outfit = rng.next();
   return {
     skin: rng.pick(SKINS),
     shirt: rng.pick(SHIRTS),
     pants: rng.pick(PANTS),
+    skirt: female && outfit < 0.4 ? rng.pick(['#e85d5d', '#2a9d8f', '#f2d15c', '#1d3557', '#f2a7b7', '#f4f0e6']) : null,
+    shorts: outfit > 0.65 && rng.chance(0.6),
+    jacket: outfit > 0.85 ? rng.pick(['#3d405b', '#6d6875', '#8a5a3a', '#1d3557']) : null,
+    glasses: rng.chance(0.3),
+    bag: female && rng.chance(0.35) ? rng.pick(['#8a5a3a', '#111111', '#c9a25e', '#b33a2b']) : null,
     hair: rng.pick(HAIRS),
     shoes: rng.pick(['#222222', '#f4f4f4', '#8b5a2b', '#b33a2b', '#3a4a6a']),
     cap: !female && rng.chance(0.22) ? rng.pick(['#e85d5d', '#1d3557', '#f2d15c', '#f4f4f0']) : null,

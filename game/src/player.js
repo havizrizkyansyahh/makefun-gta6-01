@@ -5,6 +5,8 @@ import { Human, LOOKS } from './human.js';
 import { PLAYER } from './config.js';
 import { WEAPONS, WEAPON_ORDER, traceShot, jitter } from './combat.js';
 import { Npc } from './npc.js';
+import { nearShore } from './boats.js';
+import { PIER, COAST_Z } from './city.js';
 import { damp, wrapAngle } from './rng.js';
 
 export class Player {
@@ -121,6 +123,7 @@ export class Player {
     const ml = Math.hypot(mx, mz);
     this.aiming = input.mouse(2) && this.current !== 'fist';
     if (input.mouseHit(2) && this.current !== 'fist') this.lockOn(cam);
+    if (this.aiming) this.scareInSights(cam);
     const run = input.down('ShiftLeft') || input.down('ShiftRight');
     const speed = ml > 0 ? (this.aiming ? PLAYER.walk * 0.7 : run ? PLAYER.run : PLAYER.walk) : 0;
     if (ml > 0) { mx /= ml; mz /= ml; }
@@ -249,6 +252,19 @@ export class Player {
     w.gunfire(this.pos.x, this.pos.z);
   }
 
+  /** Civilians in the sights put their hands up. */
+  scareInSights(cam) {
+    for (const n of this.world.npcs) {
+      if (n.role !== 'civ' || n.dead) continue;
+      const dx = n.pos.x - this.pos.x;
+      const dz = n.pos.z - this.pos.z;
+      const d = Math.hypot(dx, dz);
+      if (d > 25 || d < 0.5) continue;
+      const a = Math.atan2(dx, dz) - cam.yaw;
+      if (Math.abs(Math.atan2(Math.sin(a), Math.cos(a))) < 0.12) n.scare();
+    }
+  }
+
   /** Aim assist: the nearest armed enemy (or anyone, failing that) close to the crosshair. */
   lockOn(cam) {
     const w = this.world;
@@ -327,7 +343,7 @@ export class Player {
     v.input.throttle = 0;
     v.input.handbrake = false;
     this.vehicle = v;
-    this.human.root.visible = v.spec.body === 'bike';
+    this.human.root.visible = v.spec.body === 'bike' || v.spec.body === 'boat';
     this.aiming = false;
     w.onEnterVehicle(v);
   }
@@ -338,6 +354,16 @@ export class Player {
     const sx = v.spec.wid / 2 + 0.7;
     this.pos.x = v.pos.x + Math.cos(v.heading) * sx;
     this.pos.z = v.pos.z - Math.sin(v.heading) * sx;
+    if (v.spec.body === 'boat') {
+      // step across onto the pier, or wade up onto the beach
+      if (Math.abs(v.pos.x - PIER.x) < PIER.half + 5 && v.pos.z < PIER.z1 + 5) {
+        this.pos.x = PIER.x + Math.sign(v.pos.x - PIER.x || 1) * (PIER.half - 1);
+        this.pos.z = Math.min(v.pos.z, PIER.z1 - 1.5);
+      } else {
+        this.pos.x = v.pos.x;
+        this.pos.z = COAST_Z - 2;
+      }
+    }
     this.heading = v.heading;
     this.y = w.city.groundHeight(this.pos.x, this.pos.z);
     this.vel.x = v.vel.x * 0.4;
@@ -350,7 +376,7 @@ export class Player {
     v.input.throttle = 0;
     v.input.steer = 0;
     v.input.handbrake = v.speed < 9;
-    if (v.kind === 'player') v.kind = 'abandoned';
+    if (v.kind === 'player') v.kind = v.spec.body === 'boat' ? 'parked' : 'abandoned';
     this.vehicle = null;
     this.human.root.visible = true;
     w.city.pushCircle(this.pos, PLAYER.radius, this.y);
@@ -361,18 +387,44 @@ export class Player {
   drive(dt, input) {
     const w = this.world;
     const v = this.vehicle;
+    // drive-by: shoot through the crosshair with whatever gun is in hand
+    if (input.wheel) this.cycle(input.wheel > 0 ? 1 : -1);
+    if (input.hit('KeyQ')) this.cycle(1);
+    this.fireCd -= dt;
+    if (this.reloadT > 0) { this.reloadT -= dt; if (this.reloadT <= 0) this.reload(true); }
+    const gun = WEAPONS[this.current];
+    this.aiming = !gun.melee && (input.mouse(2) || input.mouse(0));
+    if (!gun.melee && input.mouse(0) && this.fireCd <= 0 && this.reloadT <= 0 && (gun.auto || input.mouseHit(0))) this.shoot(this.world.rig, gun);
     v.input.throttle = input.axis('KeyS', 'KeyW', 'ArrowDown', 'ArrowUp');
     v.input.steer = input.axis('KeyD', 'KeyA', 'ArrowRight', 'ArrowLeft');
     v.input.handbrake = input.down('Space');
     if (input.hit('KeyH')) w.audio.horn();
     if (input.hit('KeyR')) w.cycleRadio();
-    if (input.hit('KeyF') || input.hit('Enter')) { this.exitVehicle(); return; }
+    if (input.hit('KeyF') || input.hit('Enter')) {
+      const barge = v.spec.body === 'boat' && w.city.platforms.find((f) => v.pos.x > f.x0 - 5 && v.pos.x < f.x1 + 5 && v.pos.z > f.z0 - 5 && v.pos.z < f.z1 + 5);
+      if (barge) {
+        this.exitVehicle();
+        this.pos.x = Math.min(Math.max(v.pos.x, barge.x0 + 1), barge.x1 - 1);
+        this.pos.z = Math.min(Math.max(v.pos.z, barge.z0 + 1), barge.z1 - 1);
+        this.y = barge.y;
+        return;
+      }
+      if (v.spec.body === 'boat' && !nearShore(v.pos.x, v.pos.z)) w.hud.notify('Too far from shore: bring the boat in to the beach, the pier or a barge.');
+      else { this.exitVehicle(); return; }
+    }
     this.pos.x = v.pos.x;
     this.pos.z = v.pos.z;
     this.y = v.y;
     this.heading = v.heading;
     this.moveSpeed = v.speed;
-    if (v.spec.body === 'bike') {
+    if (v.spec.body === 'boat') {
+      // standing at the console
+      this.human.animate(dt, 0, 'idle');
+      const c = Math.cos(v.heading);
+      const s = Math.sin(v.heading);
+      this.human.root.position.set(v.pos.x + c * 0.25 - s * 0.2, v.y + 0.97, v.pos.z - s * 0.25 - c * 0.2);
+      this.human.root.rotation.set(v.parts.body.rotation.x, v.heading, v.parts.body.rotation.z);
+    } else if (v.spec.body === 'bike') {
       // ride it: sit on the seat and lean with the bike
       this.human.animate(dt, 0, 'ride');
       this.human.root.position.set(v.pos.x - Math.sin(v.heading) * 0.2, v.y + 0.42, v.pos.z - Math.cos(v.heading) * 0.2);

@@ -194,8 +194,8 @@ export class Helicopter {
     this.beam.scale.set(1, len, 1);
     this.beam.lookAt(this.light);
     this.beam.rotateX(-Math.PI / 2);
-    this.beam.visible = this.alive && !this.leave;
-    this.beam.material.opacity = 0.025 + this.world.sky.night * 0.08;
+    this.beam.visible = this.alive && !this.leave && this.world.sky.night > 0.4;
+    this.beam.material.opacity = 0.012 + Math.max(0, this.world.sky.night - 0.3) * 0.12;
   }
 
   remove() {

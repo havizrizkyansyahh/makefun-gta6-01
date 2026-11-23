@@ -73,6 +73,36 @@ export class Npc {
 
   get alive() { return !this.dead; }
 
+  /**
+   * At a corner of the block, sometimes carry straight on over the road at the zebra crossing
+   * (after waiting for the light) instead of turning along the block.
+   */
+  maybeCross(here, dx, dz) {
+    const L = this.loop;
+    const atX = Math.abs(here.x - L.x0) < 0.4 || Math.abs(here.x - L.x1) < 0.4;
+    const atZ = Math.abs(here.z - L.z0) < 0.4 || Math.abs(here.z - L.z1) < 0.4;
+    if (!atX || !atZ) return;
+    this.crossCool = 8;
+    if (Math.random() > 0.35) return;
+    const w = this.world;
+    const gap = w.cityPitch - (L.x1 - L.x0);
+    const tx = here.x + Math.round(dx) * gap;
+    const tz = here.z + Math.round(dz) * gap;
+    if (!w.city.blockAt(tx, tz)) return;
+    // the road being crossed runs across our path: its cars move on the other axis
+    const axis = Math.abs(dx) > Math.abs(dz) ? 'z' : 'x';
+    this.cross = { tx, tz, node: w.city.nearestNode((here.x + tx) / 2, (here.z + tz) / 2), axis };
+    this.state = 'wait';
+    this.timer = 0;
+  }
+
+  /** A gun is pointed this way: hands up for a moment. */
+  scare() {
+    if (this.dead || this.role !== 'civ' || this.state === 'flee' || this.state === 'cower') return;
+    this.state = 'cower';
+    this.timer = 2 + Math.random() * 2;
+  }
+
   /** Something scary happened at (x, z): civilians run, armed people get ready. */
   alarm(x, z) {
     if (this.dead || this.invulnerable) return;
@@ -94,6 +124,17 @@ export class Npc {
       this.dead = true;
       this.deadTime = 0;
       this.state = 'dead';
+      // ragdoll: thrown away from whatever hit them, falling the way they were pushed
+      let kx = this.pos.x - (from ? from.x : this.pos.x - Math.sin(this.heading));
+      let kz = this.pos.z - (from ? from.z : this.pos.z - Math.cos(this.heading));
+      const kl = Math.hypot(kx, kz) || 1;
+      kx /= kl; kz /= kl;
+      const k = this.knockVel || { x: kx * 2.2, z: kz * 2.2, y: 1.2 };
+      this.knock = { x: k.x, z: k.z, vy: k.y };
+      this.knockVel = null;
+      const sp = Math.hypot(k.x, k.z);
+      if (sp > 0.1) this.heading = Math.atan2(-k.x, -k.z);
+      this.spin = Math.min(9, sp * 0.6);
       this.human.setWeapon(null);
       this.world.onNpcKilled(this, from);
       return true;
@@ -106,7 +147,27 @@ export class Npc {
     const w = this.world;
     if (this.dead) {
       this.deadTime += dt;
-      this.human.animate(dt, 0, 'dead');
+      const k = this.knock;
+      if (k) {
+        // tumble, land, bounce, slide to a stop
+        this.pos.x += k.x * dt;
+        this.pos.z += k.z * dt;
+        k.vy -= 18 * dt;
+        this.y += k.vy * dt;
+        const ground = w.city.groundHeight(this.pos.x, this.pos.z);
+        if (this.y <= ground) {
+          this.y = ground;
+          k.vy = Math.abs(k.vy) > 3 ? -k.vy * 0.3 : 0;
+          const f = Math.exp(-6 * dt);
+          k.x *= f;
+          k.z *= f;
+          this.spin *= f;
+        }
+        w.city.pushCircle(this.pos, 0.3, this.y);
+        if (Math.hypot(k.x, k.z) < 0.05 && k.vy === 0) this.knock = null;
+      }
+      this.human.animate(dt, this.spin || 0, 'dead');
+      this.sync();
       return;
     }
     let moveX = 0;
@@ -135,6 +196,8 @@ export class Npc {
         moveX = tx - this.pos.x;
         moveZ = tz - this.pos.z;
         wantSpeed = this.walkSpeed;
+        this.crossCool = (this.crossCool || 0) - dt;
+        if (this.crossCool <= 0 && this.role === 'civ') this.maybeCross(here, ex / el, ez / el);
         if (Math.random() < dt * 0.02) { this.state = 'idle'; this.timer = 2 + Math.random() * 4; }
         break;
       }
@@ -173,8 +236,34 @@ export class Npc {
         break;
       }
       case 'cower':
+        // hands up while a gun is on them, then run for it
         pose = 'hands';
+        face = Math.atan2(dx, dz);
+        this.timer -= dt;
+        if (this.timer <= 0) { this.state = 'flee'; this.timer = 6; this.threat = { x: tp.x, z: tp.z }; }
         break;
+      case 'wait': {
+        // at the kerb, waiting for the cars on the road ahead to get a red light
+        pose = 'idle';
+        const c = this.cross;
+        face = Math.atan2(c.tx - this.pos.x, c.tz - this.pos.z);
+        if (w.signals.state(c.node, c.axis) === 'red' || (this.timer -= dt) < -25) this.state = 'cross';
+        break;
+      }
+      case 'cross': {
+        const c = this.cross;
+        moveX = c.tx - this.pos.x;
+        moveZ = c.tz - this.pos.z;
+        wantSpeed = this.walkSpeed * 1.25;
+        if (Math.hypot(moveX, moveZ) < 0.5) {
+          const b = w.city.blockAt(this.pos.x + Math.sign(moveX) * 2, this.pos.z + Math.sign(moveZ) * 2) || w.city.blockAt(this.pos.x, this.pos.z);
+          const loop = b && w.city.loops.find((l) => l.bx === b.bx && l.bz === b.bz);
+          if (loop) { this.loop = loop; this.s = loopProject(loop, this.pos.x, this.pos.z); }
+          this.state = 'walk';
+          this.crossCool = 30;
+        }
+        break;
+      }
       case 'combat':
       case 'arrest':
         ({ moveX, moveZ, wantSpeed, face, pose } = this.fight(dt, dx, dz, dist));
@@ -216,6 +305,15 @@ export class Npc {
     if (arresting) {
       out.pose = 'move';
       if (dist > 1.1) { out.moveX = dx; out.moveZ = dz; out.wantSpeed = dist > 6 ? 6.5 : 3; }
+      return out;
+    }
+    if (this.anchored) {
+      // holding a position (a barge, a doorway): turn and shoot, never wander off it
+      if (this.cooldown <= 0 && dist < 70) {
+        const spec = WEAPONS[this.weapon || 'pistol'];
+        this.cooldown = spec.auto ? 0.5 + Math.random() * 0.6 : 1.0 + Math.random() * 0.8;
+        this.shoot(spec, dist);
+      }
       return out;
     }
     const near = cop ? 7 : 5;

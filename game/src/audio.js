@@ -303,6 +303,32 @@ export class Sound {
     lfo.start();
   }
 
+  /** Rain: a soft hiss that swells with the downpour. */
+  rain(level) {
+    if (!this.ctx) return;
+    if (!this.rainGain) {
+      const ctx = this.ctx;
+      const src = this.noiseSource();
+      const f = ctx.createBiquadFilter();
+      f.type = 'highpass';
+      f.frequency.value = 900;
+      const f2 = ctx.createBiquadFilter();
+      f2.type = 'lowpass';
+      f2.frequency.value = 6500;
+      this.rainGain = ctx.createGain();
+      this.rainGain.gain.value = 0;
+      src.connect(f).connect(f2).connect(this.rainGain).connect(this.sfx);
+      src.start();
+    }
+    this.rainGain.gain.setTargetAtTime(level * 0.09, this.ctx.currentTime, 0.5);
+  }
+
+  thunder() {
+    if (!this.ctx) return;
+    this.burst({ freq: 120, q: 0.3, type: 'lowpass', peak: 0.9, attack: 0.08, decay: 2.8 });
+    this.burst({ freq: 400, q: 0.5, type: 'lowpass', peak: 0.4, attack: 0.02, decay: 0.9, at: 0.1 });
+  }
+
   rotor(level) {
     if (!this.ctx) return;
     this.rotorGain.gain.setTargetAtTime(level * 0.5, this.ctx.currentTime, 0.2);

@@ -189,7 +189,7 @@ export class Hud {
       e.speed.innerHTML = `<b>${kmh}</b><span>km/h</span><div class="v-hp"><i style="width:${hp}%;background:${hp < 30 ? '#ff5252' : '#ffd23f'}"></i></div>`;
     } else e.speed.style.display = 'none';
 
-    e.cross.style.display = !p.vehicle && !p.dead && p.current !== 'fist' ? '' : 'none';
+    e.cross.style.display = !p.dead && p.current !== 'fist' && (!p.vehicle || p.aiming) ? '' : 'none';
     e.cross.classList.toggle('aim', p.aiming);
     e.vignette.style.opacity = Math.min(1, p.hurtFlash * 2.5 + (p.health < 25 ? 0.35 + Math.sin(w.time * 5) * 0.15 : 0));
     this.drawMinimap();

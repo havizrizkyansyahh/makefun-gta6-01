@@ -91,6 +91,7 @@ export class Sky {
               float thick = smoothstep(0.45, 0.95, n + edge * 0.25);
               // lit side toward the sun, warm rims at golden hour, grey undersides
               vec3 lit = mix(vec3(1.0), uSunColor * 1.35, 0.55) + uSunColor * pow(s, 6.0) * 0.8;
+              lit *= 1.0 - max(uCloud - 0.6, 0.0) * 0.75;   // storm clouds are dark grey
               vec3 shade = mix(uHorizon, uZenith, 0.35) * 0.75;
               vec3 cloud = mix(lit, shade, thick * 0.65);
               cloud = mix(cloud, cloud * vec3(0.35, 0.38, 0.5), uNight * 0.85);
@@ -140,7 +141,7 @@ export class Sky {
     this.hour = hour;
     const k = sample(hour);
     // The sun rises in the east and sets out over the sea to the south-west.
-    const t = (hour - 6) / 12 * Math.PI;
+    const t = (hour - 6) / 13 * Math.PI; // sunrise 06:00, sunset 19:00, matching the sky colours
     const elev = Math.sin(t);
     const dir = new THREE.Vector3(Math.cos(t) * 0.8, Math.max(elev, -0.3), 0.45 + 0.25 * (1 - Math.abs(elev))).normalize();
     this.uniforms.uSunDir.value.copy(dir);
@@ -165,7 +166,8 @@ export class Sky {
 
   /** Re-capture the sky into scene.environment when the hour has moved on. */
   updateEnvironment(renderer, force = false) {
-    if (!force && Math.abs(this.hour - this.envHour) < 0.2) return;
+    if (!force && Math.abs(this.hour - this.envHour) < 0.2 && Math.abs(this.uniforms.uCloud.value - (this.envCloud ?? 0)) < 0.12) return;
+    this.envCloud = this.uniforms.uCloud.value;
     this.envHour = this.hour;
     if (!this.pmrem) this.pmrem = new THREE.PMREMGenerator(renderer);
     this.groundMat.color.copy(this.uniforms.uHorizon.value).multiplyScalar(0.35).lerp(new THREE.Color('#6f6658'), 0.5);

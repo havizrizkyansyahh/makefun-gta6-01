@@ -25,6 +25,8 @@ export class LaneDriver {
   }
 
   pickNext() {
+    // racers follow their course
+    if (this.route) return this.route[(this.ri + 1) % this.route.length];
     const city = this.world.city;
     const node = city.nodes[this.b];
     let options = node.links.filter((n) => n !== this.a);
@@ -46,6 +48,7 @@ export class LaneDriver {
     const w = this.world;
     const city = w.city;
     if (v.dead) { v.input.throttle = 0; return; }
+    if (this.hold) { v.input.throttle = 0; v.input.steer = 0; v.input.handbrake = true; return; }
     if (this.mode === 'parked') {
       // crew got out: stop and wait with the lights on
       v.input.throttle = v.forward > 0.3 ? -1 : v.forward < -0.3 ? 1 : 0;
@@ -73,6 +76,10 @@ export class LaneDriver {
       this.a = this.b;
       this.b = this.next;
       this.next = null;
+      if (this.route) {
+        this.ri = (this.ri + 1) % this.route.length;
+        if (this.ri === 0) this.laps = (this.laps || 0) + 1;
+      }
       return;
     }
 
@@ -126,7 +133,7 @@ export class LaneDriver {
     }
 
     // brake for whatever is in front
-    if (this.mode === 'traffic') {
+    if (this.mode === 'traffic' || this.mode === 'race') {
       const gap = this.clearAhead(10 + Math.abs(speed) * 1.1);
       if (gap < Infinity) want = Math.min(want, Math.max(0, (gap - 5) * 0.8));
       if (want < 1 && gap < 9) {

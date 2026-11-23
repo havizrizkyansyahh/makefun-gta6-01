@@ -145,6 +145,7 @@ export function mergeParts(parts, withColor = true) {
   const pos = [];
   const nor = [];
   const colr = [];
+  const uvs = [];
   const v = new THREE.Vector3();
   const n = new THREE.Vector3();
   const nm = new THREE.Matrix3();
@@ -155,17 +156,20 @@ export function mergeParts(parts, withColor = true) {
     const Nn = g.attributes.normal;
     nm.getNormalMatrix(matrix);
     c.set(color || '#ffffff');
+    const U = g.attributes.uv;
     for (let i = 0; i < P.count; i += 1) {
       v.fromBufferAttribute(P, i).applyMatrix4(matrix);
       n.fromBufferAttribute(Nn, i).applyMatrix3(nm).normalize();
       pos.push(v.x, v.y, v.z);
       nor.push(n.x, n.y, n.z);
       if (withColor) colr.push(c.r, c.g, c.b);
+      if (U) uvs.push(U.getX(i), U.getY(i)); else uvs.push(0, 0);
     }
   }
   const out = new THREE.BufferGeometry();
   out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   out.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  out.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   if (withColor) out.setAttribute('color', new THREE.Float32BufferAttribute(colr, 3));
   out.computeBoundingSphere();
   return out;

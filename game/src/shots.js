@@ -158,6 +158,33 @@ export async function stageShot(name, world, { menu, hud }) {
     look();
     run(world, input, 2.4, look);
   }
+  else if (name === 'night') {
+    // the Bayside Run on a rainy night: wet streets, neon, rivals' tail lights
+    world.newGame();
+    world.hour = 21.3;
+    world.weather.set(1);
+    const race = world.missions.race;
+    const r = race.route;
+    const p = world.player;
+    const car = world.traffic.spawnCar({ a: r[0], b: r[1], t: 0.02 }, 'bayrunner');
+    car.parts.paint.color.set('#e63946');
+    car.driver = null;
+    p.pos.x = car.pos.x; p.pos.z = car.pos.z;
+    p.tryEnter();
+    race.begin();
+    race.active.countdown = 0;
+    race.active.rivals.forEach((c, k) => { c.ai.hold = false; c.ai.cruise = 21 - k * 1.5; });
+    const pilot = new LaneDriver(world, car, r[0], r[1], 'race');
+    pilot.route = r;
+    pilot.ri = 1;
+    pilot.cruise = 30;
+    pilot.clearAhead = () => Infinity;
+    const drive = p.drive.bind(p);
+    p.drive = (dt, inp) => { drive(dt, inp); if (p.vehicle) pilot.update(dt); };
+    const look = () => { world.rig.yaw = car.heading + 0.3; world.rig.pitch = 0.17; world.rig.idle = 0; };
+    look();
+    run(world, input, 4.6, look);
+  }
   // only the play itself in the frame: no leftover title cards or notices
   hud.el.notes.innerHTML = '';
   hud.bigT = 0;
