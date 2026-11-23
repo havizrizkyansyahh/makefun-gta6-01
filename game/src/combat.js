@@ -1,14 +1,31 @@
-// Weapons and hit detection: the arsenal table, ray tests against people (upright cylinders),
-// vehicles (boxes in the car's own frame) and the city's buildings, and the one firing routine
-// the player, gang members and police all use.
+// Weapons and hit detection: the arsenal table (fists, Kestrel 9, Viper SMG, Breaker 12 and the
+// Gull Carbine), ray tests against people (upright cylinders), vehicles (boxes in the car's own
+// frame), range targets (discs) and the city's buildings, and the one firing routine the player,
+// gang members and police all use.
 
 export const WEAPONS = {
   fist: { name: 'Fists', dmg: 16, rate: 0.42, range: 1.9, melee: true },
   pistol: { name: 'Kestrel 9', dmg: 30, rate: 0.26, mag: 12, spread: 0.010, range: 140, sound: 'pistol', price: 400, ammoPrice: 60, ammoPack: 24 },
   smg: { name: 'Viper SMG', dmg: 16, rate: 0.085, mag: 32, spread: 0.032, range: 100, auto: true, sound: 'smg', price: 1800, ammoPrice: 120, ammoPack: 64 },
   shotgun: { name: 'Breaker 12', dmg: 15, pellets: 8, rate: 0.85, mag: 6, spread: 0.085, range: 50, sound: 'shotgun', price: 2600, ammoPrice: 150, ammoPack: 12 },
+  // a short semi-auto-fed carbine: hits hard, reaches far, steady in the hand when aimed
+  carbine: { name: 'Gull Carbine', dmg: 36, rate: 0.15, mag: 24, spread: 0.006, range: 190, auto: true, sound: 'carbine', price: 4200, ammoPrice: 180, ammoPack: 48 },
 };
-export const WEAPON_ORDER = ['fist', 'pistol', 'smg', 'shotgun'];
+export const WEAPON_ORDER = ['fist', 'pistol', 'smg', 'shotgun', 'carbine'];
+
+/**
+ * Ray vs a flat round board facing along z (the range's targets). Returns { t, d } with d the
+ * distance from the centre in metres, or null when the ray misses the board.
+ */
+export function rayDisc(ox, oy, oz, dx, dy, dz, x, y, z, r) {
+  if (Math.abs(dz) < 1e-6) return null;
+  const t = (z - oz) / dz;
+  if (t <= 0) return null;
+  const hx = ox + dx * t - x;
+  const hy = oy + dy * t - y;
+  const d = Math.hypot(hx, hy);
+  return d <= r ? { t, d } : null;
+}
 
 /** Ray vs an upright cylinder (a person standing at x, z from y0 to y1). Returns t or -1. */
 export function rayCylinder(ox, oy, oz, dx, dy, dz, x, z, y0, y1, r) {

@@ -1,7 +1,8 @@
 // Portraits and map icons. Each character's face is rendered from their actual in-game 3D model
 // (a small studio: key light, rim light, a coloured backdrop) into a round, framed image; places
-// get bold pictograms (a house, a pistol, a parcel, a chequered flag, a cross, a badge). The
-// minimap, the city map and its cards all draw from this set.
+// get bold pictograms (a house, a pistol, a parcel, a chequered flag, a cross, a badge, a door,
+// a wrench, a shirt, a target, a buoy, a washing machine). The minimap, the city map and its
+// cards all draw from this set.
 import * as THREE from '../vendor/three.module.min.js';
 import { Human, LOOKS } from './human.js';
 
@@ -138,6 +139,40 @@ function placeIcon(kind, color) {
       poly([[58, 80], [102, 80], [80, 124]]);
       g.fillStyle = color; g.beginPath(); g.arc(80, 66, 11, 0, Math.PI * 2); g.fill();
       break;
+    case 'door':
+      g.fillRect(54, 40, 52, 82);
+      g.fillStyle = color; g.fillRect(62, 48, 36, 74);
+      g.fillStyle = '#ffffff'; g.beginPath(); g.arc(90, 86, 4.5, 0, Math.PI * 2); g.fill();
+      break;
+    case 'wrench':
+      g.save();
+      g.translate(80, 80);
+      g.rotate(-Math.PI / 4);
+      g.fillRect(-8, -18, 16, 62);
+      g.beginPath(); g.arc(0, -26, 20, 0, Math.PI * 2); g.fill();
+      g.fillStyle = color; g.fillRect(-7, -50, 14, 26);
+      g.restore();
+      break;
+    case 'shirt':
+      poly([[58, 40], [70, 46], [90, 46], [102, 40], [126, 58], [114, 76], [104, 70], [104, 122], [56, 122], [56, 70], [46, 76], [34, 58]]);
+      g.fillStyle = color; g.beginPath(); g.arc(80, 46, 9, 0, Math.PI); g.fill();
+      break;
+    case 'target':
+      for (const [r, c] of [[46, '#ffffff'], [34, color], [22, '#ffffff'], [10, color]]) { g.fillStyle = c; g.beginPath(); g.arc(80, 80, r, 0, Math.PI * 2); g.fill(); }
+      break;
+    case 'buoy':
+      poly([[64, 112], [96, 112], [90, 74], [70, 74]]);
+      poly([[72, 74], [88, 74], [80, 40]]);
+      g.fillStyle = color; g.fillRect(64, 92, 32, 8);
+      g.strokeStyle = '#ffffff'; g.lineWidth = 5;
+      g.beginPath(); g.moveTo(40, 120); g.quadraticCurveTo(60, 110, 80, 120); g.quadraticCurveTo(100, 130, 120, 120); g.stroke();
+      break;
+    case 'laundry':
+      g.fillRect(48, 38, 64, 84);
+      g.fillStyle = color; g.beginPath(); g.arc(80, 86, 22, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#ffffff'; g.beginPath(); g.arc(80, 86, 13, 0, Math.PI * 2); g.fill();
+      g.fillStyle = color; g.fillRect(56, 46, 12, 8); g.fillRect(74, 46, 6, 8);
+      break;
     default:
       g.beginPath(); g.arc(80, 80, 24, 0, Math.PI * 2); g.fill();
   }
@@ -153,10 +188,20 @@ export function makeIcons(renderer) {
     pearl: [LOOKS.pearl, '#ff5fa2', '#3d1f3a'],
     halo: [LOOKS.calder, '#ff4d4d', '#2a2a33'],
     cop: [LOOKS.cop, '#5c8dff', '#1c2541'],
+    hollis: [LOOKS.hollis, '#ff4d4d', '#1c2541'],
+    vey: [LOOKS.vey, '#ff4d4d', '#3a2a22'],
+    ines: [LOOKS.ines, '#ffa94d', '#2a3550'],
+    tailor: [LOOKS.tailor, '#c77dff', '#3a2a4a'],
   };
   for (const [k, [look, ring, bg]] of Object.entries(faces)) {
     try { icons[k] = renderPortrait(renderer, look, ring, bg); } catch { icons[k] = placeIcon('dot', ring); }
   }
+  icons.door = placeIcon('door', '#2ec4b6');
+  icons.wrench = placeIcon('wrench', '#ffa94d');
+  icons.shirt = placeIcon('shirt', '#c77dff');
+  icons.target = placeIcon('target', '#ff7043');
+  icons.buoy = placeIcon('buoy', '#3fb6c9');
+  icons.laundry = placeIcon('laundry', '#ff5fa2');
   icons.house = placeIcon('house', '#52d273');
   icons.gun = placeIcon('gun', '#ff7043');
   icons.box = placeIcon('box', '#4fc3f7');

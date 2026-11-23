@@ -1,6 +1,7 @@
 // Entry point: sets up the renderer, sound, HUD, menus, input and the world, then runs the frame
 // loop through three states: the title screen (a slow camera flight over the live city), play,
-// and pause. ?shot=<name> stages one of the screenshot scenes instead (see shots.js).
+// and pause (also when the tab is hidden). ?shot=<name> stages one of the screenshot scenes
+// instead (see shots.js).
 import * as THREE from '../vendor/three.module.min.js';
 import { World } from './world.js';
 import { Input } from './input.js';
@@ -10,6 +11,7 @@ import { Menu } from './menu.js';
 import { CAMERA } from './config.js';
 import { PostFX } from './postfx.js';
 import { makeIcons } from './portraits.js';
+import { PhotoMode } from './photo.js';
 
 const canvas = document.getElementById('game');
 const params = new URLSearchParams(location.search);
@@ -32,6 +34,7 @@ const pixelRatio = renderer.getPixelRatio();
 world.post = new PostFX(renderer);
 world.post.setSize(innerWidth, innerHeight, pixelRatio);
 window.solmara = world; // handy from the devtools console
+const photo = new PhotoMode(world, document.getElementById('hud'));
 
 let state = 'title';
 let titleT = 0;
@@ -62,7 +65,8 @@ menu.on('new', () => {
   world.player.human.root.visible = true;
   play();
   world.hud.bigText('SOLMARA BAY', 'Six years away. One sister, one debt, one city.', 4.5, '#ffd27a');
-  setTimeout(() => world.hud.notify('Follow the N on the minimap to meet Nadia.'), 2500);
+  setTimeout(() => world.hud.notify("Follow Nadia's portrait on the minimap to meet her."), 2500);
+  setTimeout(() => world.hud.notify('Glowing doorways can be walked into: press E.'), 9000);
 });
 menu.on('continue', (save) => {
   world.load(save);
@@ -77,6 +81,7 @@ menu.on('quit', () => {
 });
 
 input.onLockChange = (locked) => {
+  if (!locked && state === 'photo') { photo.exit(); state = 'play'; }
   if (!locked && state === 'play') pause();
 };
 canvas.addEventListener('click', () => { if (state === 'play') input.requestLock(); });
@@ -122,8 +127,20 @@ addEventListener('resize', () => {
 });
 
 addEventListener('keydown', (e) => {
-  if (state === 'play' && e.code === 'KeyM') pause('map');
+  // the map key is a letter the shop screens do not use, but not while one has the keyboard
+  if (state === 'play' && e.code === 'KeyM' && !world.ui) pause('map');
   if (state === 'play' && e.code === 'Escape') pause();
+  // photo mode freezes the moment; P again (or Esc) unfreezes it
+  if (e.code === 'KeyP' && !e.repeat) {
+    if (state === 'play' && !world.ui && !world.player.dead) { state = 'photo'; photo.enter(); audio.engine(false, 0, 0); audio.skid(0); }
+    else if (state === 'photo') { photo.exit(); state = 'play'; }
+  }
+  if (state === 'photo' && e.code === 'Escape') { photo.exit(); state = 'play'; }
+});
+
+// switching tabs or windows mid-chase pauses rather than letting the cops catch up unseen
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && state === 'play') pause();
 });
 
 let last = performance.now();
@@ -135,6 +152,8 @@ function frame(now) {
   } else if (state === 'title') {
     world.step(dt, input);
     titleCamera(dt);
+  } else if (state === 'photo') {
+    photo.update(dt, input);
   }
   world.render();
   input.endFrame();

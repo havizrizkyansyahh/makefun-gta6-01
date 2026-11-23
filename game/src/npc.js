@@ -1,6 +1,7 @@
 // People on the street: civilians walking the sidewalk loops around each block (and fleeing when
 // guns come out), police officers who arrest or shoot depending on the wanted level, Glass Saints
-// gang members who guard their turf and fight, and the story's contacts who wait for Kai.
+// gang members and harbour-board heavies who guard their turf and fight, the story's contacts
+// who wait for Kai, and the staff and customers inside the shops.
 import { Human, civilianLook, LOOKS } from './human.js';
 import { WEAPONS, jitter, traceShot } from './combat.js';
 import { clamp, damp, wrapAngle } from './rng.js';
@@ -65,6 +66,8 @@ export class Npc {
     this.accuracy = opts.accuracy ?? (role === 'saint' ? 0.85 : 1);
     this.alertRange = opts.alertRange ?? 26;
     this.persistent = !!opts.persistent;
+    this.area = opts.area || null;       // the room a shop customer browses
+    this.interior = opts.interior || null;
     this.inVehicle = null;
     this.vehicle = null;
     this.punchT = 0;
@@ -235,6 +238,21 @@ export class Npc {
         if (Math.hypot(moveX, moveZ) < 0.6) { this.s = s; this.state = 'walk'; }
         break;
       }
+      case 'browse': {
+        // a customer in a shop: drift between spots in the room, stop and look, move on
+        const A = this.area;
+        if (!A) { this.state = 'idle'; break; }
+        if (!this.goal || this.timer <= 0) {
+          this.goal = { x: A.x0 + Math.random() * (A.x1 - A.x0), z: A.z0 + Math.random() * (A.z1 - A.z0) };
+          this.timer = 4 + Math.random() * 6;
+        }
+        this.timer -= dt;
+        moveX = this.goal.x - this.pos.x;
+        moveZ = this.goal.z - this.pos.z;
+        if (Math.hypot(moveX, moveZ) < 0.5) { moveX = 0; moveZ = 0; pose = 'idle'; } else wantSpeed = 1.0;
+        if (dist < 2.2) face = Math.atan2(dx, dz);
+        break;
+      }
       case 'cower':
         // hands up while a gun is on them, then run for it
         pose = 'hands';
@@ -247,7 +265,10 @@ export class Npc {
         pose = 'idle';
         const c = this.cross;
         face = Math.atan2(c.tx - this.pos.x, c.tz - this.pos.z);
-        if (w.signals.state(c.node, c.axis) === 'red' || (this.timer -= dt) < -25) this.state = 'cross';
+        const light = w.signals.state(c.node, c.axis);
+        // on red they walk; when the lights only blink at night they look, wait a moment and go
+        if (light === 'red' || (light === 'flash' && this.timer < -3) || (this.timer -= dt) < -25) this.state = 'cross';
+        if (light === 'flash') this.timer -= dt;
         break;
       }
       case 'cross': {

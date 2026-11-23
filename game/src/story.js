@@ -1,10 +1,16 @@
-// The story of Solmara Bay, in five missions. Kai Moreno comes home after six years on the
-// northern fishing boats to find the Glass Saints squeezing every stall on Palmline Beach,
-// his sister Nadia's food truck included. Auntie Pearl, who launders more than shirts at her
-// Spin City laundromat, gives him work, and the work leads to the Saints' boss, Halo Calder.
+// The story of Solmara Bay, in ten missions and two acts. Kai Moreno comes home after six years
+// on the northern fishing boats to find the Glass Saints squeezing every stall on Palmline
+// Beach, his sister Nadia's food truck included. Auntie Pearl, who launders more than shirts at
+// her Spin City laundromat, gives him work, and the work leads to the Saints' boss, Halo Calder.
+// With Calder gone, the ledger names who really ran the bay: Captain Hollis of the SBPD and his
+// friends on the harbour board, who move in on what the Saints left behind.
 //
 // Each mission is a list of steps. A step's enter(ctx) sets it up, and its update(ctx, dt)
 // returns true when the step is done (or ctx.fail(reason) ends the mission).
+import { BoatPilot } from './boats.js';
+import { LOOKS } from './human.js';
+import { PIER, COAST_Z } from './city.js';
+import { wrapAngle } from './rng.js';
 
 export const CAST = {
   kai: { name: 'KAI', color: '#2ec4b6' },
@@ -13,7 +19,332 @@ export const CAST = {
   dex: { name: 'DEX', color: '#bde0fe' },
   halo: { name: 'HALO', color: '#e0e0e0' },
   radio: { name: 'SBPD RADIO', color: '#7aa2ff' },
+  hollis: { name: 'CAPT. HOLLIS', color: '#9ab8ff' },
+  vey: { name: 'SGT. VEY', color: '#d9a47a' },
+  crew: { name: 'HARBOUR CREW', color: '#f2923a' },
+  ines: { name: 'INES', color: '#ffa94d' },
+  news: { name: 'CHANNEL 6', color: '#ff7a1a' },
 };
+
+const inBoat = (ctx) => !!ctx.world.player.vehicle && ctx.world.player.vehicle.spec.body === 'boat';
+
+/**
+ * Hold Hollis's crippled yacht still once its engines quit: swing it round to head out to sea,
+ * pin it there, and once it lies straight lay a walkable deck over it (with the saloon solid)
+ * and bring his men up from below.
+ */
+function moorYacht(ctx, dt) {
+  const y = ctx.data.yacht;
+  if (!y) return;
+  if (!ctx.data.anchor) ctx.data.anchor = { x: y.pos.x, z: y.pos.z };
+  const a = ctx.data.anchor;
+  y.ai = null;
+  y.locked = true;
+  y.vel.x = 0;
+  y.vel.z = 0;
+  y.input.throttle = 0;
+  y.input.steer = 0;
+  y.pos.x = a.x;
+  y.pos.z = a.z;
+  y.health = Math.max(y.health, 30);
+  y.heading = wrapAngle(y.heading + wrapAngle(0 - y.heading) * Math.min(1, dt * 1.6));
+  y.y = -0.35;
+  y.mesh.position.set(a.x, y.y, a.z);
+  y.mesh.rotation.y = y.heading;
+  y.parts.body.rotation.set(0, 0, 0);
+  if (Math.random() < dt * 5) ctx.world.fx.spawn('smoke', a.x, 3.4, a.z - 4.2);
+  if (ctx.data.deck || Math.abs(y.heading) > 0.03) return;
+  y.heading = 0;
+  const s = y.spec;
+  const deckY = y.y + s.deck;
+  const city = ctx.world.city;
+  ctx.data.deck = city.addDeck(a.x - s.wid / 2 + 0.4, a.x + s.wid / 2 - 0.4, a.z - s.len / 2 + 0.7, a.z + s.len / 2 - 1.8, deckY, 'yacht');
+  ctx.data.cabin = city.addCollider(a.x - 0.95, a.x + 0.95, a.z + 0.5 - 2.0, a.z + 0.5 + 2.0, deckY + 2.2, 'cabin');
+  ctx.onCleanup(() => { city.removePlatform(ctx.data.deck); city.removeCollider(ctx.data.cabin); });
+  const spots = [[0, -4.6, true], [-1.2, -2.6], [1.2, -3.3], [-1.25, 3.4], [1.25, 4.2]];
+  ctx.data.crew = spots.map(([ox, oz, boss]) => {
+    const x = a.x + ox;
+    const z = a.z + oz;
+    const n = boss
+      ? ctx.spawnBoss(x, z, { look: LOOKS.hollis, name: 'Captain Hollis', icon: 'hollis', health: 240, weapon: 'carbine' })
+      : ctx.spawnCrew(x, z, 1, 0.01, LOOKS.dock)[0];
+    n.pos.x = x;
+    n.pos.z = z;
+    n.y = deckY;
+    n.anchored = true;
+    n.alertRange = 80;
+    n.state = 'combat';
+    return n;
+  });
+  ctx.data.hollis = ctx.data.crew[0];
+}
+
+const STORY_TWO = [
+  {
+    id: 'hot-plates',
+    title: 'Hot Plates',
+    giver: 'nadia',
+    reward: 3500,
+    intro: [
+      ['nadia', 'They took my truck, Kai. Hooked it up at dawn and drove off with the grill still warm.'],
+      ['nadia', 'Harbour board stickers on the windscreen. The ledger said whose board that is.'],
+      ['kai', 'Hollis. Then the harbour board can give it back.'],
+    ],
+    steps: [
+      {
+        text: "Catch the crew driving off in Nadia's truck. Ram it until they bail.",
+        enter: (ctx) => {
+          ctx.hideTruck();
+          const v = ctx.spawnFleeing('pelican', 150);
+          v.color = '#ff9f1c';
+          v.parts.paint.color.set('#ff9f1c');
+          v.armor = 0.35;
+          v.health = 100;
+          ctx.data.truck = v;
+          ctx.arrowOn(v, '#ffb000');
+          ctx.say([['kai', 'Orange van with a grill on the roof. Hard to miss.'], ['nadia', 'Do not scratch it any more than they already have!']]);
+        },
+        update: (ctx) => {
+          const v = ctx.data.truck;
+          if (v.health <= 0) return ctx.fail("Nadia's truck was wrecked.");
+          if (ctx.distTo(v.pos) > 340) return ctx.fail('The truck got away.');
+          if (v.health < 62) { ctx.stopVehicle(v); return true; }
+          return false;
+        },
+      },
+      {
+        text: 'Deal with the harbour crew',
+        enter: (ctx) => {
+          const v = ctx.data.truck;
+          ctx.clearArrows();
+          const sx = Math.cos(v.heading) * 2.6;
+          const sz = -Math.sin(v.heading) * 2.6;
+          ctx.data.crew = ctx.spawnCrew(v.pos.x + sx, v.pos.z + sz, 3, 1.6, LOOKS.dock);
+          for (const g of ctx.data.crew) g.state = 'combat';
+          ctx.say([['crew', 'Captain says this truck is impounded!'], ['kai', 'Tell him to come and impound it himself.']]);
+        },
+        update: (ctx) => {
+          if (ctx.data.truck.health <= 0) return ctx.fail("Nadia's truck was wrecked.");
+          return ctx.countDead(ctx.data.crew, 'Deal with the harbour crew');
+        },
+      },
+      {
+        text: "Get in Nadia's truck.",
+        enter: (ctx) => { ctx.data.truck.locked = false; ctx.arrowOn(ctx.data.truck, '#ffb000'); },
+        update: (ctx) => {
+          if (ctx.data.truck.health <= 0) return ctx.fail("Nadia's truck was wrecked.");
+          return ctx.world.player.vehicle === ctx.data.truck;
+        },
+      },
+      {
+        text: 'Drive the truck home to Palmline Beach, and lose the cops on the way.',
+        enter: (ctx) => {
+          ctx.clearArrows();
+          const n = ctx.place('nadia');
+          ctx.data.m = ctx.marker(n.x, n.z - 6.5, '#ffb000', 3.6);
+          ctx.world.police.set(1);
+          ctx.say([['radio', 'Stolen catering vehicle, orange, heading for Palmline.'], ['kai', 'Stolen. From me. Right.']]);
+        },
+        update: (ctx) => {
+          const v = ctx.data.truck;
+          if (v.health <= 0) return ctx.fail("Nadia's truck was wrecked.");
+          if (ctx.world.player.vehicle === v && ctx.data.m.inside(ctx.px, ctx.pz, 1.5) && ctx.world.police.stars > 0) ctx.world.hud.help('Lose the cops before Nadia sees them.');
+          return ctx.world.player.vehicle === v && ctx.data.m.inside(ctx.px, ctx.pz, 1.5) && ctx.world.police.stars === 0;
+        },
+      },
+      {
+        text: 'Talk to Nadia.',
+        enter: (ctx) => {
+          ctx.restoreTruck(ctx.data.truck);
+          ctx.say([
+            ['nadia', 'The grill is bent. The awning is gone. There is a bullet hole in the menu.'],
+            ['nadia', 'It is perfect. Thank you.'],
+            ['kai', 'Hollis will not stop at a food truck.'],
+            ['nadia', 'Then neither will we.'],
+          ]);
+        },
+        update: (ctx) => ctx.talkDone(),
+      },
+    ],
+  },
+  {
+    id: 'dry-cleaning',
+    title: 'Dry Cleaning',
+    giver: 'pearl',
+    reward: 5000,
+    intro: [
+      ['pearl', 'Sergeant Vey walked into my laundry an hour ago with three friends who left their badges at home.'],
+      ['pearl', 'They are turning over my machines for the copy of the ledger I keep in the back office. Get it before they do.'],
+    ],
+    steps: [
+      {
+        text: 'Go into Spin City Laundry (the pink door next to Pearl).',
+        enter: (ctx) => { const d = ctx.place('laundryDoor'); ctx.data.m = ctx.marker(d.x, d.z, '#ff5fa2', 1.4); },
+        update: (ctx) => ctx.inRoom('laundry'),
+      },
+      {
+        text: "Take out Vey's crew",
+        enter: (ctx) => {
+          const r = ctx.room('laundry');
+          ctx.data.crew = [[-4.5, 2.6], [2.2, 4.6], [-9.6, -4.2], [3.6, -3.4]].map(([lx, lz]) => {
+            const p = r.at(lx, lz);
+            const g = ctx.spawnCrew(p.x, p.z, 1, 0.01, LOOKS.dock)[0];
+            g.pos.x = p.x;
+            g.pos.z = p.z;
+            g.alertRange = 30;
+            return g;
+          });
+          const vp = r.at(8.6, -4.0);
+          const vey = ctx.spawnBoss(vp.x, vp.z, { look: LOOKS.vey, name: 'Sergeant Vey', icon: 'vey', health: 210, weapon: 'shotgun' });
+          vey.alertRange = 9;
+          ctx.data.crew.push(vey);
+          ctx.data.vey = vey;
+          ctx.arrowOn(vey, '#ff4d4d');
+          ctx.say([['vey', 'Moreno! You should have stuck to fish.'], ['kai', 'Everybody keeps telling me that.']]);
+        },
+        update: (ctx) => ctx.countDead(ctx.data.crew, "Take out Vey's crew"),
+      },
+      {
+        text: 'Grab the ledger copy from the back office.',
+        enter: (ctx) => {
+          ctx.clearArrows();
+          const p = ctx.room('laundry').at(9.1, -5.4);
+          ctx.data.ledger = ctx.pickup('ledger', p.x, p.z);
+          ctx.say([['kai', 'Taped under the desk. Pearl, you are a genius.']]);
+        },
+        update: (ctx) => ctx.data.ledger.taken,
+      },
+      {
+        text: 'Leave the laundry.',
+        update: (ctx) => !ctx.world.interior,
+      },
+      {
+        text: 'Lose the cops.',
+        enter: (ctx) => { ctx.world.police.set(2); ctx.say([['radio', 'Shots fired at Spin City Laundry. Officer down. All units.']]); },
+        update: (ctx) => ctx.world.police.stars === 0,
+      },
+      {
+        text: 'Bring the ledger copy to Pearl.',
+        enter: (ctx) => { ctx.data.m = ctx.markAt('pearl'); },
+        update: (ctx) => ctx.data.m.inside(ctx.px, ctx.pz, 2),
+      },
+      {
+        text: 'Talk to Pearl.',
+        enter: (ctx) => ctx.say([
+          ['pearl', 'Vey, gone. And they shot my good dryer. Thirty years that dryer and I have been together.'],
+          ['pearl', 'Ines at Torque & Tide says Hollis bought a yacht last month. Cash. On a captain\'s salary.'],
+          ['kai', 'Then he is planning to leave.'],
+        ]),
+        update: (ctx) => ctx.talkDone(),
+      },
+    ],
+  },
+  {
+    id: 'low-tide',
+    title: 'Low Tide',
+    giver: 'nadia',
+    reward: 12000,
+    intro: [
+      ['nadia', 'The fishermen saw Captain Hollis load half the precinct evidence room onto a yacht in the harbour.'],
+      ['nadia', 'He is running, Kai. If he makes open water, a ledger is all we will ever have.'],
+      ['kai', 'Then he does not make open water.'],
+    ],
+    steps: [
+      {
+        text: 'Take a speedboat from the end of the pier.',
+        enter: (ctx) => { ctx.ensureBoat(); ctx.data.m = ctx.markAt('pierEnd'); },
+        update: (ctx) => inBoat(ctx),
+      },
+      {
+        text: "Catch Captain Hollis's yacht and shoot it until the engines quit.",
+        enter: (ctx) => {
+          const x0 = PIER.x - 190;
+          const z0 = PIER.z1 + 70;
+          const path = [[-260, 170], [-200, 300], [-330, 420], [-180, 520], [-420, 590], [-640, 610]].map(([dx, dz]) => ({ x: PIER.x + dx, z: PIER.z1 + dz }));
+          const y = ctx.spawnCar('tidecaller', x0, z0, Math.atan2(-0.4, 1));
+          y.health = 100;
+          y.armor = 0.35;
+          y.driver = { look: null };
+          y.ai = new BoatPilot(ctx.world, y, { path, cruise: 0.85 });
+          ctx.data.yacht = y;
+          ctx.arrowOn(y, '#ff4d4d');
+          ctx.data.escorts = [-14, 14].map((ox) => {
+            const e = ctx.spawnCar('marisol', x0 + ox, z0 - 12, 0);
+            e.parts.paint.color.set('#1d3557');
+            e.health = 70;
+            e.driver = { look: null };
+            e.ai = new BoatPilot(ctx.world, e, { mode: 'ram' });
+            return e;
+          });
+          ctx.newsHeli(y.pos);
+          ctx.say([
+            ['hollis', 'Moreno. You are a fisherman with a gun. Go home.'],
+            ['kai', 'I am home.'],
+            ['news', 'Channel 6 live over the bay: a police captain\'s yacht, and somebody chasing it.'],
+          ]);
+        },
+        update: (ctx) => {
+          const y = ctx.data.yacht;
+          y.health = Math.max(y.health, 30);
+          if (ctx.distTo(y.pos) > 480) return ctx.fail('Hollis made it to open water.');
+          if (y.ai && y.ai.done) return ctx.fail('Hollis made it to open water.');
+          for (const e of ctx.data.escorts) if (e.health <= 0 && e.ai) { e.ai = null; e.driver = null; }
+          return y.health < 50;
+        },
+      },
+      {
+        text: 'Pull up alongside the yacht and press F to board it.',
+        enter: (ctx) => {
+          ctx.clearArrows();
+          ctx.say([['kai', 'Engines are smoking. He is dead in the water.'], ['hollis', 'Get up here, all of you! Shoot him!']]);
+          for (const e of ctx.data.escorts) if (e.ai) e.ai = new BoatPilot(ctx.world, e, { path: [{ x: e.pos.x - 500, z: e.pos.z + 250 }], cruise: 1 });
+        },
+        update: (ctx, dt) => {
+          moorYacht(ctx, dt);
+          const d = ctx.data.deck;
+          const p = ctx.world.player;
+          return !!d && !p.vehicle && p.pos.x > d.x0 - 0.5 && p.pos.x < d.x1 + 0.5 && p.pos.z > d.z0 - 0.5 && p.pos.z < d.z1 + 0.5;
+        },
+      },
+      {
+        text: 'Take down Captain Hollis and his men',
+        enter: (ctx) => { if (ctx.data.hollis && !ctx.data.hollis.dead) ctx.arrowOn(ctx.data.hollis, '#ff4d4d'); },
+        update: (ctx, dt) => { moorYacht(ctx, dt); return ctx.countDead(ctx.data.crew, 'Take down Captain Hollis and his men'); },
+      },
+      {
+        text: 'Grab the evidence case from the aft deck.',
+        enter: (ctx) => {
+          ctx.clearArrows();
+          const a = ctx.data.anchor;
+          ctx.data.case = ctx.pickup('case', a.x + 0.6, a.z - 5.2);
+          ctx.data.case.mesh.position.y = ctx.data.deck.y + 0.6;
+          ctx.data.case.baseY = ctx.data.deck.y + 0.6;
+          ctx.say([['hollis', 'You have no idea who else is in that case, Moreno.'], ['kai', 'Channel 6 is about to find out.']]);
+        },
+        update: (ctx, dt) => { moorYacht(ctx, dt); return ctx.data.case.taken; },
+      },
+      {
+        text: 'Get back in your boat and take the case to Nadia on the beach.',
+        enter: (ctx) => {
+          const n = ctx.place('nadia');
+          ctx.data.m = ctx.marker(n.x, COAST_Z + 11, '#ffb000', 5);
+          ctx.say([['radio', 'All units on the water, stand down. Repeat, stand down. By order of the Mayor.']]);
+        },
+        update: (ctx, dt) => { moorYacht(ctx, dt); return ctx.data.m.inside(ctx.px, ctx.pz, 3); },
+      },
+      {
+        text: 'Talk to Nadia.',
+        enter: (ctx) => ctx.say([
+          ['nadia', 'Channel 6 had it live. Hollis in cuffs on his own boat, and you on the news in that shirt.'],
+          ['pearl', 'The harbour board resigned an hour ago. All of them. Even the ones I liked.'],
+          ['kai', 'So what happens now?'],
+          ['nadia', 'Now you eat. And tomorrow you help me open the second truck.'],
+        ]),
+        update: (ctx) => ctx.talkDone(),
+      },
+    ],
+  },
+];
 
 const inCar = (ctx) => !!ctx.world.player.vehicle;
 
@@ -372,10 +703,12 @@ export const MISSIONS = [
             ['pearl', 'Boat is here. The Saints are scattering like gulls, Kai.'],
             ['nadia', 'They are saying the boulevard is free. Free! Come home and eat something.'],
             ['kai', 'Solmara Bay. Six years, and it is still the best view on the coast.'],
+            ['pearl', 'Enjoy it while it lasts. The ledger has more names in it than Halo Calder\'s.'],
           ]);
         },
         update: (ctx) => ctx.talkDone(),
       },
     ],
   },
+  ...STORY_TWO,
 ];

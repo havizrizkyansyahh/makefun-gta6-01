@@ -1,5 +1,6 @@
-// MeshBuilder merges many boxes and quads into one BufferGeometry with per-vertex colour and
-// world-scaled UVs, so a whole city of buildings, curbs and road paint draws in a few calls.
+// MeshBuilder merges many boxes, quads, discs and shelves into one BufferGeometry with
+// per-vertex colour and world-scaled UVs, so a whole city of buildings, curbs and road paint,
+// or a whole furnished room, draws in a few calls.
 import * as THREE from '../vendor/three.module.min.js';
 
 const FACES = [
@@ -79,6 +80,46 @@ export class MeshBuilder {
     const [tu, tv] = tile || [1, 1];
     this.quad([x0, y, z1], [x1, y, z1], [x1, y, z0], [x0, y, z0], [0, 1, 0], color,
       [[x0 / tu, -z1 / tv], [x1 / tu, -z1 / tv], [x1 / tu, -z0 / tv], [x0 / tu, -z0 / tv]]);
+  }
+
+  /**
+   * Open shelving: four uprights and evenly spaced boards between y0 and y1 (shop racks, the
+   * laundry's folding shelves, the gun wall). Boards take boardColor, the frame takes color.
+   */
+  shelf(x0, y0, z0, x1, y1, z1, levels, color, boardColor = color) {
+    const t = 0.05;
+    for (const x of [x0, x1 - t]) for (const z of [z0, z1 - t]) this.box(x, y0, z, x + t, y1, z + t, color);
+    for (let k = 0; k < levels; k += 1) {
+      const y = y0 + 0.08 + ((y1 - y0 - 0.12) * k) / Math.max(1, levels - 1);
+      this.box(x0, y, z0, x1, y + 0.035, z1, boardColor, { faces: ['px', 'nx', 'py', 'pz', 'nz', 'ny'] });
+    }
+  }
+
+  /**
+   * A flat round disc (washer doors, clock faces, range targets painted on a wall) centred at
+   * (cx, cy, cz) and facing along +axis ('x', 'y' or 'z'; a leading '-' flips it).
+   */
+  disc(cx, cy, cz, r, axis, color, seg = 20) {
+    const flip = axis.startsWith('-') ? -1 : 1;
+    const a = axis.replace('-', '');
+    const normal = a === 'x' ? [flip, 0, 0] : a === 'y' ? [0, flip, 0] : [0, 0, flip];
+    const point = (ang) => {
+      const u = Math.cos(ang) * r;
+      const v = Math.sin(ang) * r;
+      if (a === 'x') return [cx, cy + v, cz - u * flip];
+      if (a === 'y') return [cx + u, cy, cz - v * flip];
+      return [cx + u * flip, cy + v, cz];
+    };
+    const centre = this.vertexCount;
+    this.pos.push(cx, cy, cz); this.nor.push(...normal); this.col.push(color.r, color.g, color.b); this.uv.push(0.5, 0.5);
+    for (let i = 0; i <= seg; i += 1) {
+      const ang = (i / seg) * Math.PI * 2;
+      this.pos.push(...point(ang));
+      this.nor.push(...normal);
+      this.col.push(color.r, color.g, color.b);
+      this.uv.push(0.5 + Math.cos(ang) * 0.5, 0.5 + Math.sin(ang) * 0.5);
+    }
+    for (let i = 0; i < seg; i += 1) this.idx.push(centre, centre + 1 + i, centre + 2 + i);
   }
 
   /**

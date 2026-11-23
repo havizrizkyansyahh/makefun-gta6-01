@@ -1,7 +1,8 @@
 // All sound is synthesised with WebAudio, nothing is loaded: gunshots, punches, crashes and
 // explosions from shaped noise, a car engine that follows the revs, tyre squeal, a wailing
-// police siren, menu blips, and three original radio stations composed on the fly by a
-// step sequencer (chords, bass, drums and a lead line) that the car radio cycles through.
+// police siren, menu blips, doors, spray cans, wrenches, tills, range buzzers, gulls and
+// fireworks, and four original radio stations composed on the fly by a step sequencer (chords,
+// bass, drums and a lead line) that the car radio cycles through and the shops play indoors.
 
 const NOTE = (n) => 440 * Math.pow(2, (n - 69) / 12);
 
@@ -26,6 +27,14 @@ export const STATIONS = [
     scale: [60, 62, 64, 67, 69, 72, 74],
     kick: 'x......x..x.....', snare: '....x.......x...', hat: 'x.x.x.x.x.x.x.x.',
     bassRhythm: 'x.......x.x.....', lead: 0.22, pad: 'sine', leadWave: 'sine',
+  },
+  {
+    // smooth soul: what plays in the shops and the laundromat, and on the car radio too
+    name: 'SEAGLASS 101.3', tag: 'smooth soul', bpm: 92, swing: 0.16,
+    chords: [[62, 65, 69, 72], [67, 71, 74, 77], [60, 64, 67, 71], [57, 60, 64, 67]], // Dm7 G7 Cmaj7 Am7
+    scale: [62, 64, 65, 67, 69, 71, 72, 74],
+    kick: 'x.....x...x.....', snare: '....x.......x..x', hat: 'x.xxx.xxx.xxx.x.',
+    bassRhythm: 'x..x..x...x.x...', lead: 0.28, pad: 'triangle', leadWave: 'sine',
   },
 ];
 
@@ -140,6 +149,11 @@ export class Sound {
     } else if (kind === 'smg') {
       this.burst({ freq: 2200, q: 0.9, peak: 0.45 * v, decay: 0.08 });
       this.tone({ freq: 180, to: 70, type: 'triangle', peak: 0.35 * v, decay: 0.07 });
+    } else if (kind === 'carbine') {
+      // a sharp crack with a longer tail than the pistol
+      this.burst({ freq: 2600, q: 0.8, peak: 0.6 * v, decay: 0.1 });
+      this.burst({ freq: 700, q: 0.5, peak: 0.35 * v, decay: 0.28, at: 0.01 });
+      this.tone({ freq: 140, to: 48, type: 'sine', peak: 0.6 * v, decay: 0.16 });
     } else {
       this.burst({ freq: 1600, q: 0.7, peak: 0.7 * v, decay: 0.16 });
       this.tone({ freq: 160, to: 55, type: 'sine', peak: 0.55 * v, decay: 0.14 });
@@ -207,8 +221,55 @@ export class Sound {
         [64, 61, 57, 52].forEach((n, i) => this.tone({ freq: NOTE(n), type: 'sawtooth', peak: 0.12, decay: 0.45, at: i * 0.18 }));
         break;
       case 'wasted': this.tone({ freq: 300, to: 60, type: 'sawtooth', peak: 0.25, attack: 0.05, decay: 2.2 }); break;
+      case 'door':
+        // latch click and a soft swing
+        this.burst({ freq: 2400, q: 4, peak: 0.18, decay: 0.03 });
+        this.burst({ freq: 300, q: 0.7, type: 'lowpass', peak: 0.2, attack: 0.04, decay: 0.35, at: 0.04 });
+        break;
+      case 'spray':
+        this.burst({ freq: 5200, q: 0.4, type: 'highpass', peak: 0.16, attack: 0.08, decay: 0.9 });
+        break;
+      case 'wrench':
+        [0, 0.12, 0.24].forEach((at) => { this.burst({ freq: 3400, q: 6, peak: 0.2, decay: 0.05, at }); this.tone({ freq: 1900, type: 'triangle', peak: 0.06, decay: 0.08, at }); });
+        break;
+      case 'register':
+        this.tone({ freq: 2093, type: 'triangle', peak: 0.12, decay: 0.3 });
+        this.tone({ freq: 2637, type: 'triangle', peak: 0.1, decay: 0.45, at: 0.06 });
+        this.burst({ freq: 900, q: 1, peak: 0.12, decay: 0.12, at: 0.18 });
+        break;
+      case 'buzzer': this.tone({ freq: 196, type: 'square', peak: 0.12, attack: 0.01, decay: 0.6 }); break;
+      case 'target': this.tone({ freq: 1568, to: 2093, type: 'square', peak: 0.07, decay: 0.08 }); break;
+      case 'miss': this.tone({ freq: 330, to: 220, type: 'square', peak: 0.07, decay: 0.14 }); break;
       default: this.tone({ freq: 700, peak: 0.1, decay: 0.08 });
     }
+  }
+
+  /** A gull's cry, falling off with distance: two quick yelps gliding down. */
+  gull(d = 0) {
+    if (!this.ctx) return;
+    const v = this.fall(d * 0.5);
+    if (v < 0.03) return;
+    const base = 1500 + Math.random() * 500;
+    for (let k = 0; k < 2 + Math.floor(Math.random() * 2); k += 1) {
+      this.tone({ freq: base, to: base * 0.55, type: 'sawtooth', peak: 0.035 * v, attack: 0.02, decay: 0.22, at: k * 0.28 });
+      this.tone({ freq: base * 1.5, to: base * 0.8, type: 'sine', peak: 0.025 * v, attack: 0.02, decay: 0.2, at: k * 0.28 });
+    }
+  }
+
+  /** A firework over the bay: the launch whistle, then the bang and its crackle. */
+  firework(d = 0, delay = 0) {
+    if (!this.ctx) return;
+    const v = this.fall(d * 0.25);
+    if (v < 0.02) return;
+    this.tone({ freq: 600, to: 2200, type: 'sine', peak: 0.04 * v, attack: 0.05, decay: 0.9, at: delay });
+    this.burst({ freq: 260, q: 0.4, type: 'lowpass', peak: 0.7 * v, attack: 0.005, decay: 0.9, at: delay + 1.0 });
+    for (let k = 0; k < 6; k += 1) this.burst({ freq: 4000, q: 2, peak: 0.08 * v, decay: 0.04, at: delay + 1.15 + k * 0.07 + Math.random() * 0.05 });
+  }
+
+  /** Indoors the shop radio plays SEAGLASS 101.3 quietly; outdoors the music bus returns. */
+  indoor(on) {
+    if (!this.ctx) return;
+    this.music.gain.setTargetAtTime(this.volume.music * (on ? 0.55 : 1), this.ctx.currentTime, 0.3);
   }
 
   // ------------------------------------------------------------ continuous voices

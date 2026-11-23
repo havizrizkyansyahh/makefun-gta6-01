@@ -1,16 +1,23 @@
 // Takes the entry's screenshots: starts headless Chrome, opens each scene listed in shots.json
 // (game/index.html?shot=<scene>) from the local server, waits until the game sets
-// window.__shotReady, and saves a 1280x720 JPEG of the page into screenshots/.
-// Usage: node serve.ts &  then  node tools/capture.mjs [--only <name>]
+// window.__shotReady, and saves a 1280x720 JPEG of the page into screenshots/. It also checks
+// every shader the scene compiled and warns about any that failed (a failed shader draws
+// nothing, which is easy to miss in a picture: the sea went missing that way once).
+// Usage: node serve.ts &  then  node tools/capture.mjs [--only <name>] [--scene <scene> --out <file>]
+// --scene captures one of the extra ?shot= scenes (garage, apartment, range, yacht...) to --out.
 import { spawn } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const shots = JSON.parse(readFileSync(join(root, 'shots.json'), 'utf8'));
-const only = process.argv.includes('--only') ? process.argv[process.argv.indexOf('--only') + 1] : null;
+const arg = (name) => (process.argv.includes(name) ? process.argv[process.argv.indexOf(name) + 1] : null);
+const only = arg('--only');
+const scene = arg('--scene');
+const shots = scene
+  ? [{ name: resolve(arg('--out') || join(tmpdir(), `solmara-${scene}.jpg`)), query: `?shot=${scene}&seed=7` }]
+  : JSON.parse(readFileSync(join(root, 'shots.json'), 'utf8'));
 const CHROME = process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const PORT = 9333;
 const BASE = process.env.GAME_URL || 'http://localhost:8080/';
@@ -65,6 +72,11 @@ try {
     }
     if (!ready) { console.log(`${shot.name}: scene never became ready`); continue; }
     await sleep(1200); // let the HUD's fades settle
+    const check = await cdp.send('Runtime.evaluate', {
+      expression: 'window.solmara ? window.solmara.renderer.info.programs.filter((p) => p.diagnostics && !p.diagnostics.runnable).length : 0',
+    });
+    const broken = check.result && check.result.result ? check.result.result.value : 0;
+    if (broken) console.warn(`${shot.name}: ${broken} shader program(s) failed to compile`);
     let quality = 86;
     let bytes;
     do {
@@ -72,7 +84,9 @@ try {
       bytes = Buffer.from(r.result.data, 'base64');
       quality -= 6;
     } while (bytes.length > 250 * 1024 && quality > 40);
-    writeFileSync(join(root, 'screenshots', shot.name), bytes);
+    const file = scene ? shot.name : join(root, 'screenshots', shot.name);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, bytes);
     console.log(`${shot.name}: ${(bytes.length / 1024).toFixed(0)} KiB at quality ${quality + 6}`);
   }
   cdp.close();

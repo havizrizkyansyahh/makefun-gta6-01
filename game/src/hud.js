@@ -1,8 +1,9 @@
 // The heads-up display, drawn with plain DOM over the canvas: cash, wanted stars, weapon and
 // ammo, clock, the rotating minimap with health and armour bars, the mission objective and
-// timer, subtitles, help prompts, the gun shop list, pop-up notices, district / vehicle / radio
-// names, the speedometer, big mission and WASTED titles, the damage vignette and the crosshair.
-// It also paints the full-screen city map for the pause menu.
+// timer, subtitles, help prompts, the gun counter's list, the shop and workshop screens,
+// pop-up notices, district / vehicle / radio names, the speedometer, big mission and WASTED
+// titles, the damage vignette, the door fade and the crosshair. Indoors the minimap turns into
+// the room's floor plan.
 import { WeaponHud } from './weaponui.js';
 import { DISTRICTS } from './city.js';
 import { CITY } from './config.js';
@@ -47,11 +48,13 @@ export class Hud {
     e.sub = $('div', 'hud-sub', root);
     e.help = $('div', 'hud-help', root);
     e.shop = $('div', 'hud-shop', root);
+    e.panel = $('div', 'hud-panel', root);
+    e.fade = $('div', 'hud-fade', root);
     e.notes = $('div', 'hud-notes', root);
     e.big = $('div', 'hud-big', root);
     e.bigT = $('div', 'b-title', e.big);
     e.bigS = $('div', 'b-sub', e.big);
-    const br = $('div', 'hud-br', root);
+    const br = e.br = $('div', 'hud-br', root);
     e.popup = $('div', 'hud-popup', br);
     e.radio = $('div', 'hud-radio', br);
     e.speed = $('div', 'hud-speed', br);
@@ -75,10 +78,44 @@ export class Hud {
   frameStart() {
     this.helpText = null;
     this.shopItems = null;
+    this.panelSpec = null;
   }
 
   help(text) { this.helpText = text; }
-  shop(items) { this.shopItems = items; }
+  shop(items, title = 'COASTLINE ARMS') { this.shopItems = items; this.shopTitle = title; }
+
+  /**
+   * A shop or workshop screen for this frame: { title, color, subtitle, tabs, tab, rows: [{
+   * label, value, right, sel, dim, good, swatch }], foot }. Redrawn only when it changes.
+   */
+  panel(spec) { this.panelSpec = spec; }
+
+  /** A quick dip to black and back (walking through a door, sleeping). */
+  fade(ms = 380) {
+    const f = this.el.fade;
+    f.style.transition = 'none';
+    f.style.opacity = '1';
+    void f.offsetWidth;
+    f.style.transition = `opacity ${ms}ms ease-out`;
+    f.style.opacity = '0';
+  }
+
+  drawPanel() {
+    const e = this.el;
+    const s = this.panelSpec;
+    if (!s) {
+      if (this.lastPanel) { e.panel.style.display = 'none'; this.lastPanel = ''; }
+      return;
+    }
+    const tabs = s.tabs ? `<div class="p-tabs">${s.tabs.map((t, i) => `<span class="${i === s.tab ? 'on' : ''}">${t}</span>`).join('')}</div>` : '';
+    const rows = s.rows.map((r) => `<div class="p-row${r.sel ? ' sel' : ''}${r.dim ? ' dim' : ''}${r.good ? ' good' : ''}">${r.swatch ? `<i style="background:${r.swatch}"></i>` : ''}<span>${r.label}</span>${r.value ? `<b>${r.value}</b>` : ''}<em>${r.right || ''}</em></div>`).join('');
+    const html = `<div class="p-title" style="color:${s.color}">${s.title}</div>${s.subtitle ? `<div class="p-sub">${s.subtitle}</div>` : ''}${tabs}<div class="p-rows">${rows}</div><div class="p-foot">${s.foot || ''}</div>`;
+    if (html === this.lastPanel) return;
+    this.lastPanel = html;
+    e.panel.style.display = 'block';
+    e.panel.style.borderTopColor = s.color;
+    e.panel.innerHTML = html;
+  }
 
   notify(text) {
     const n = $('div', 'note', this.el.notes, text);
@@ -145,7 +182,9 @@ export class Hud {
       e.objTitle.textContent = obj.title;
       e.objText.textContent = obj.text;
     }
-    const t = w.missions.timer;
+    let t = w.missions.timer;
+    if (t === null || t === undefined) t = w.activities.timer();
+    if (t === null || t === undefined) t = w.garage.timer();
     e.timer.style.display = t !== null && t !== undefined ? '' : 'none';
     if (t !== null && t !== undefined) {
       const s = Math.max(0, Math.ceil(t));
@@ -158,8 +197,8 @@ export class Hud {
       e.sub.innerHTML = `<b style="color:${line.who.color}">${line.who.name}</b> ${line.text}`;
     } else e.sub.style.display = 'none';
 
-    let help = this.helpText;
-    if (!help && !p.vehicle && !p.dead) {
+    let help = w.ui ? null : this.helpText;
+    if (!help && !p.vehicle && !p.dead && !w.ui) {
       for (const v of w.vehicles) {
         if (!v.dead && !v.locked && Math.hypot(v.pos.x - p.pos.x, v.pos.z - p.pos.z) < 4.2) {
           help = v.driver ? `Press F to steal the ${v.spec.name}` : `Press F to get in the ${v.spec.name}`;
@@ -171,8 +210,13 @@ export class Hud {
     if (help) e.help.textContent = help;
     if (this.shopItems) {
       e.shop.style.display = '';
-      e.shop.innerHTML = `<div class="s-title">COASTLINE ARMS</div>${this.shopItems.map((i) => `<div class="s-row${w.money < i.price ? ' poor' : ''}"><kbd>${i.key}</kbd><span>${i.label}</span><em>$${i.price}</em></div>`).join('')}<div class="s-foot">Press a number to buy</div>`;
-    } else e.shop.style.display = 'none';
+      const html = `<div class="s-title">${this.shopTitle}</div>${this.shopItems.map((i) => `<div class="s-row${w.money < i.price ? ' poor' : ''}"><kbd>${i.key}</kbd><span>${i.label}</span><em>$${i.price.toLocaleString('en-US')}</em></div>`).join('')}<div class="s-foot">Press a number to buy</div>`;
+      if (html !== this.lastShop) { e.shop.innerHTML = html; this.lastShop = html; }
+    } else { e.shop.style.display = 'none'; this.lastShop = ''; }
+    this.drawPanel();
+    // a shop screen owns the right-hand side: the speedometer and the radio name step aside
+    e.br.style.visibility = w.ui ? 'hidden' : '';
+    this.weapons.panel.style.visibility = w.ui ? 'hidden' : '';
 
     if (this.bigT > 0) { this.bigT -= dt; if (this.bigT <= 0) e.big.classList.remove('on'); }
     if (this.popT > 0) { this.popT -= dt; if (this.popT <= 0) e.popup.classList.remove('on'); }
@@ -185,7 +229,7 @@ export class Hud {
       e.speed.innerHTML = `<b>${kmh}</b><span>km/h</span><div class="v-hp"><i style="width:${hp}%;background:${hp < 30 ? '#ff5252' : '#ffd23f'}"></i></div>`;
     } else e.speed.style.display = 'none';
 
-    e.cross.style.display = !p.dead && p.current !== 'fist' && (!p.vehicle || p.aiming) ? '' : 'none';
+    e.cross.style.display = !p.dead && !w.ui && p.current !== 'fist' && (!p.vehicle || p.aiming) ? '' : 'none';
     e.cross.classList.toggle('aim', p.aiming);
     e.vignette.style.opacity = Math.min(1, p.hurtFlash * 2.5 + (p.health < 25 ? 0.35 + Math.sin(w.time * 5) * 0.15 : 0));
     this.drawMinimap();
@@ -197,8 +241,75 @@ export class Hud {
     return [(x + CITY.bounds) * mm.scale, (z + CITY.bounds) * mm.scale];
   }
 
+  /** Indoors the minimap becomes the room's floor plan: walls, furniture, people, the way out. */
+  drawRoomPlan(room) {
+    const w = this.world;
+    const g = this.el.mapCtx;
+    const S = this.el.map.width;
+    const R = S / 2;
+    g.save();
+    g.clearRect(0, 0, S, S);
+    g.beginPath();
+    g.arc(R, R, R - 2, 0, Math.PI * 2);
+    g.clip();
+    g.fillStyle = '#141a2a';
+    g.fillRect(0, 0, S, S);
+    const k = (S * 0.7) / Math.max(room.w, room.d);
+    const P = (lx, lz) => [R + lx * k, R + lz * k];
+    const [x0, z0] = P(-room.w / 2, -room.d / 2);
+    g.fillStyle = '#3a4258';
+    g.fillRect(x0, z0, room.w * k, room.d * k);
+    g.strokeStyle = room.def.color;
+    g.lineWidth = 3;
+    g.strokeRect(x0, z0, room.w * k, room.d * k);
+    g.fillStyle = 'rgba(200,210,230,0.45)';
+    for (const s of room.solids) {
+      const [a, b] = P(s.x0, s.z0);
+      g.fillRect(a, b, (s.x1 - s.x0) * k, (s.z1 - s.z0) * k);
+    }
+    // the door
+    const [ex, ez] = P(room.exit.x, room.exit.z);
+    g.fillStyle = '#3dff8b';
+    g.fillRect(ex - 8, ez + 4, 16, 5);
+    // things to do in here
+    for (const s of room.spots) {
+      const [a, b] = P(s.x, s.z);
+      g.beginPath(); g.arc(a, b, 4, 0, Math.PI * 2);
+      g.fillStyle = '#ffd23f';
+      g.fill();
+    }
+    for (const n of w.npcs) {
+      if (n.dead || !room.contains(n.pos.x, n.pos.z)) continue;
+      const [a, b] = P(n.pos.x - room.ox, n.pos.z - room.oz);
+      g.beginPath(); g.arc(a, b, 3.5, 0, Math.PI * 2);
+      g.fillStyle = n.role === 'saint' ? '#ff4d4d' : n.invulnerable ? '#7ff7e6' : '#cfd6e0';
+      g.fill();
+    }
+    for (const b of w.missions.blips()) {
+      if (b.kind !== 'objective' || !room.contains(b.x, b.z)) continue;
+      const [a, c] = P(b.x - room.ox, b.z - room.oz);
+      g.strokeStyle = '#ffd23f';
+      g.lineWidth = 2;
+      g.beginPath(); g.arc(a, c, 7 + Math.sin(w.time * 5) * 2, 0, Math.PI * 2); g.stroke();
+    }
+    const p = w.player;
+    const [px, pz] = P(p.pos.x - room.ox, p.pos.z - room.oz);
+    g.translate(px, pz);
+    g.rotate(-p.heading + Math.PI);
+    g.beginPath();
+    g.moveTo(0, -8); g.lineTo(6, 6); g.lineTo(0, 3); g.lineTo(-6, 6); g.closePath();
+    g.fillStyle = '#ffffff';
+    g.fill();
+    g.restore();
+    g.fillStyle = '#ffffff';
+    g.font = 'bold 12px "Avenir Next", sans-serif';
+    g.textAlign = 'center';
+    g.fillText(room.name.toUpperCase(), R, S - 26);
+  }
+
   drawMinimap() {
     const w = this.world;
+    if (w.interior) { this.drawRoomPlan(w.interior); return; }
     const g = this.el.mapCtx;
     const S = this.el.map.width;
     const R = S / 2;

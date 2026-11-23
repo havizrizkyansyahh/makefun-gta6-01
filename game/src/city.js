@@ -1,7 +1,8 @@
 // Solmara Bay itself: a 9 x 9 block grid city on a sunny bay, generated from a seed. It builds
 // the meshes (towers, hotels, homes, warehouses, parks, beach, pier, palms, lamps, signs), the
 // collision boxes and their spatial grid, the road graph traffic drives on, the sidewalk loops
-// pedestrians walk, the named districts and places the story uses, and the minimap picture.
+// pedestrians walk, the named districts and places the story uses (the shops with doors, the
+// Torque & Tide workshop), walkable decks, and the minimap picture.
 import * as THREE from '../vendor/three.module.min.js';
 import { CITY } from './config.js';
 import { MeshBuilder, col, mergeParts, mat4 } from './geometry.js';
@@ -78,6 +79,7 @@ export class City {
     this.buildBlocks();
     this.buildBeach();
     this.buildProps();
+    this.buildGarage();
     this.buildGreenery();
     this.buildHills();
     this.buildMinimap();
@@ -183,12 +185,22 @@ export class City {
       chopShop: { x: blockCentre(7), z: blockCentre(3), label: 'Glass Saints chop shop' },
       tower: { x: blockCentre(4), z: blockCentre(4), label: 'Sunstone Plaza' },
       pierEnd: { x: PIER.x, z: PIER.z1 - 6, label: 'End of the pier' },
+      boutique: { ...front(4, 7, 's'), label: 'Threadline Outfitters', blip: 'T', color: '#c77dff' },
+      buoyRun: { x: PIER.x + 26, z: PIER.z1 + 8, label: 'Buoy Run', color: '#3fb6c9' },
     };
+    const pl = this.places;
+    pl.laundryDoor = { x: pl.pearl.x + 7, z: pl.pearl.z, face: pl.pearl.face, label: 'Spin City Laundry', color: '#ff5fa2' };
+    // Torque & Tide Customs fills the north-east corner of the parking lot by Kai's apartment
+    const lx1 = blockMax(6) - CITY.walk;
+    const lz0 = blockMin(7) + CITY.walk;
+    const shed = { x0: lx1 - 31, x1: lx1 - 1, z0: lz0 + 1, z1: lz0 + 19 };
+    pl.garage = { x: (shed.x0 + shed.x1) / 2, z: shed.z0 + 10, face: 0, shed, label: 'Torque & Tide Customs', color: '#ffa94d' };
   }
 
   // ---------------------------------------------------------------- colliders
-  addCollider(x0, x1, z0, z1, y1, tag = 'wall') {
-    const c = { x0, x1, z0, z1, y0: 0, y1, tag };
+  /** A solid box from y0 (default the ground) up to y1; a raised y0 makes a ceiling or a lintel. */
+  addCollider(x0, x1, z0, z1, y1, tag = 'wall', y0 = 0) {
+    const c = { x0, x1, z0, z1, y0, y1, tag };
     const index = this.colliders.length;
     this.colliders.push(c);
     for (let gx = Math.floor(x0 / CELL); gx <= Math.floor(x1 / CELL); gx += 1) {
@@ -206,6 +218,12 @@ export class City {
     return this.grid.get(Math.floor(x / CELL) * 4096 + Math.floor(z / CELL)) || [];
   }
 
+  /** Retire a collider (a yacht's cabin after the mission): it no longer blocks anything. */
+  removeCollider(c) {
+    c.y0 = 0;
+    c.y1 = -1;
+  }
+
   /**
    * Push a circle at p = {x, z} with radius r out of every box taller than y. Returns the summed
    * push normal (or null when nothing touched), so vehicles can bounce and take damage.
@@ -219,7 +237,8 @@ export class City {
           if (seen.has(index)) continue;
           seen.add(index);
           const c = this.colliders[index];
-          if (y >= c.y1 - 0.05) continue;
+          // stepping over low boxes, walking under ceilings and lintels
+          if (y >= c.y1 - 0.05 || y + 1.9 < c.y0) continue;
           const qx = clamp(p.x, c.x0, c.x1);
           const qz = clamp(p.z, c.z0, c.z1);
           let dx = p.x - qx;
@@ -743,7 +762,7 @@ export class City {
     this.group.add(poles, heads);
 
     // shop signs for the places the story uses
-    for (const key of ['pearl', 'safehouse', 'gunshop', 'courier', 'hospital', 'precinct']) {
+    for (const key of ['pearl', 'safehouse', 'gunshop', 'courier', 'hospital', 'precinct', 'boutique']) {
       const p = this.places[key];
       const sign = makeSign(p.label.replace(' (save)', ''), p.color);
       // set the sign against the building face behind the sidewalk point
@@ -752,6 +771,66 @@ export class City {
       sign.rotation.y = p.face;
       this.group.add(sign);
     }
+  }
+
+  /**
+   * Torque & Tide Customs: an open-fronted workshop on the parking lot by Kai's apartment. A
+   * concrete apron, block walls on three sides, a corrugated roof, the roller door rolled up, a
+   * two-post lift, tool benches, tyre stacks and a lit sign. Parking bays under it and in front
+   * of it are cleared so there is always a way in.
+   */
+  buildGarage() {
+    const g = this.places.garage;
+    const s = g.shed;
+    const y0 = CITY.curb;
+    const h = 6.2;
+    const mb = new MeshBuilder();
+    const wall = col('#d9d2c4');
+    const trim = col('#ffa94d');
+    const dark = col('#3a3d42');
+    this.parking = this.parking.filter((p) => !(p.x > s.x0 - 5 && p.x < s.x1 + 5 && p.z < s.z1 + 26));
+    // floor apron with painted bay lines
+    mb.flat(s.x0, s.z0, s.x1, s.z1 + 3, y0 + 0.02, col('#7d7a74'), [3, 3]);
+    for (const x of [s.x0 + 10, s.x1 - 10]) mb.flat(x - 0.08, s.z0 + 1, x + 0.08, s.z1 + 2, y0 + 0.03, col('#ffd23f'));
+    // walls
+    const t = 0.35;
+    mb.box(s.x0, y0, s.z0, s.x1, h, s.z0 + t, wall, { tile: [4, 4] });
+    mb.box(s.x0, y0, s.z0, s.x0 + t, h, s.z1, wall, { tile: [4, 4] });
+    mb.box(s.x1 - t, y0, s.z0, s.x1, h, s.z1, wall, { tile: [4, 4] });
+    this.addCollider(s.x0, s.x1, s.z0, s.z0 + t, h, 'building');
+    this.addCollider(s.x0, s.x0 + t, s.z0, s.z1, h, 'building');
+    this.addCollider(s.x1 - t, s.x1, s.z0, s.z1, h, 'building');
+    // roof, header with the rolled-up door, orange trim
+    mb.box(s.x0 - 0.4, h, s.z0 - 0.4, s.x1 + 0.4, h + 0.35, s.z1 + 0.8, col('#9aa2ab'));
+    mb.box(s.x0, h - 1.3, s.z1 - 0.3, s.x1, h, s.z1 + 0.6, wall);
+    mb.box(s.x0 + 1, h - 1.0, s.z1 + 0.6, s.x1 - 1, h - 0.5, s.z1 + 0.9, dark);
+    mb.box(s.x0 - 0.42, h - 0.05, s.z1 + 0.78, s.x1 + 0.42, h + 0.4, s.z1 + 0.9, trim);
+    // two-post lift in the left bay
+    for (const x of [s.x0 + 2.4, s.x0 + 8.6]) mb.box(x - 0.2, y0, s.z0 + 5, x + 0.2, y0 + 4.2, s.z0 + 5.4, col('#c0392b'));
+    mb.box(s.x0 + 2.2, y0 + 4.2, s.z0 + 5, s.x0 + 8.8, y0 + 4.45, s.z0 + 5.4, col('#c0392b'));
+    // tool benches and tool boards along the back wall
+    for (const [a, b] of [[s.x0 + 11, s.x0 + 16], [s.x1 - 8, s.x1 - 3]]) {
+      mb.box(a, y0, s.z0 + t, b, y0 + 0.95, s.z0 + 1.2, col('#5a5e66'));
+      mb.box(a, y0 + 0.95, s.z0 + t, b, y0 + 1.0, s.z0 + 1.25, col('#a77b52'));
+      mb.box(a, y0 + 1.4, s.z0 + t, b, y0 + 2.6, s.z0 + t + 0.05, col('#4a6a8a'));
+      this.addCollider(a, b, s.z0, s.z0 + 1.2, 1, 'prop');
+    }
+    // tyre stacks in the corner
+    for (let k = 0; k < 4; k += 1) mb.cylinder(s.x1 - 1.4, s.z0 + 3 + (k % 2) * 1.4, 0.45, y0 + Math.floor(k / 2) * 0.6, y0 + Math.floor(k / 2) * 0.6 + 0.55, col('#1c1d21'), { segments: 14 });
+    this.addCollider(s.x1 - 2, s.x1 - t, s.z0 + 2.4, s.z0 + 5, 1.3, 'prop');
+    const mesh = new THREE.Mesh(mb.build(), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.82, envMapIntensity: 0.5 }));
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    this.group.add(mesh);
+    const sign = makeSign('TORQUE & TIDE CUSTOMS', g.color);
+    sign.scale.set(1.6, 1.4, 1);
+    sign.position.set(g.x, h + 1.4, s.z1 + 0.95);
+    this.group.add(sign);
+    // a strip light under the header so the bay reads as open at night
+    const strip = new THREE.Mesh(new THREE.BoxGeometry(s.x1 - s.x0 - 3, 0.08, 0.3), new THREE.MeshStandardMaterial({ color: '#fff4dc', emissive: '#ffe2b0', emissiveIntensity: 0 }));
+    strip.position.set(g.x, h - 1.35, s.z1 - 0.6);
+    this.group.add(strip);
+    this.garageStrip = strip.material;
   }
 
   /**
@@ -1112,8 +1191,18 @@ export class City {
   }
 
   removePlatform(p) {
-    for (const m of p.meshes) this.group.remove(m);
+    for (const m of p.meshes || []) this.group.remove(m);
     this.platforms = this.platforms.filter((q) => q !== p);
+  }
+
+  /**
+   * A walkable deck with no mesh of its own (a moored yacht's, an interior's floor): people on
+   * it stand at height y and stay within its edges.
+   */
+  addDeck(x0, x1, z0, z1, y, tag = 'deck') {
+    const p = { x0, x1, z0, z1, y, tag };
+    this.platforms.push(p);
+    return p;
   }
 
   /** Let the sea reflect the sky of the hour. */
@@ -1142,6 +1231,7 @@ export class City {
   update(time, night) {
     for (const m of this.nightMaterials) m.emissiveIntensity = night * m.userData.nightScale;
     this.lampMaterial.emissiveIntensity = night * 2.2;
+    if (this.garageStrip) this.garageStrip.emissiveIntensity = 0.4 + night * 2.4;
     this.poolMaterial.opacity = night * 0.55;
     this.neonMaterial.color.setScalar(0.45 + night * 2.6);
     this.water.material.uniforms.uTime.value = time;
@@ -1226,17 +1316,21 @@ function makeWater() {
       uniform vec3 uDeep;
       uniform vec3 uShallow;
       uniform vec3 uSun;
+      uniform vec3 uSkyH;
+      uniform vec3 uSkyZ;
+      uniform vec3 uSunDir;
       varying vec3 vWorld;
       varying float vWave;
       #include <fog_pars_fragment>
       void main() {
         float shore = smoothstep(${(COAST_Z + 60).toFixed(1)}, ${(COAST_Z - 4).toFixed(1)}, vWorld.z);
         vec3 c = mix(uDeep, uShallow, shore * 0.85 + vWave * 0.4);
-        // ripple normal from two travelling wave trains
+        // ripple normal from two travelling wave trains, and a diagonal chop to break up the bands
+        float chop = sin((vWorld.x * 0.83 + vWorld.z * 0.57) * 0.62 + uTime * 1.4) * cos((vWorld.x * 0.31 - vWorld.z * 0.95) * 0.48 - uTime * 0.8);
         vec3 n = normalize(vec3(
-          cos(vWorld.x * 0.9 + uTime * 2.0) * 0.08 + cos(vWorld.x * 0.08 + uTime * 1.3) * 0.05,
+          cos(vWorld.x * 0.9 + uTime * 2.0) * 0.05 + cos(vWorld.x * 0.08 + uTime * 1.3) * 0.05 + chop * 0.06,
           1.0,
-          cos(vWorld.z * 0.7 - uTime * 1.7) * 0.08 + cos(vWorld.z * 0.11 - uTime * 0.9) * 0.05));
+          cos(vWorld.z * 0.7 - uTime * 1.7) * 0.05 + cos(vWorld.z * 0.11 - uTime * 0.9) * 0.05 - chop * 0.05));
         vec3 v = normalize(cameraPosition - vWorld);
         float fres = pow(1.0 - max(dot(n, v), 0.0), 4.0);
         vec3 r = reflect(-v, n);

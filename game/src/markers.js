@@ -1,6 +1,7 @@
 // World markers and pickups: the glowing beam and ground ring that show where a mission step
-// waits, the bouncing arrow over a target, and spinning pickups (sun shells, cash, ammo, health,
-// armour) the player collects by walking or driving through them.
+// waits, the doorways of the buildings Kai can walk into, the bouncing arrow over a target, and
+// spinning pickups (sun shells, cash, ammo, health, armour, the ledger and the evidence case)
+// the player collects by walking or driving through them.
 import * as THREE from '../vendor/three.module.min.js';
 
 const beamGeo = new THREE.CylinderGeometry(1, 1, 14, 24, 1, true);
@@ -47,6 +48,64 @@ export class Marker {
   remove() { this.scene.remove(this.group); }
 }
 
+const doorGeo = {
+  post: new THREE.BoxGeometry(0.08, 1.5, 0.08),
+  lintel: new THREE.BoxGeometry(0.9, 0.08, 0.08),
+  disc: new THREE.CircleGeometry(1, 32),
+};
+doorGeo.disc.rotateX(-Math.PI / 2);
+
+/**
+ * A door you can walk through: a glowing doorway outline hovering over a soft disc on the
+ * pavement (or the floor, inside). Smaller and calmer than a mission marker.
+ */
+export class DoorMarker {
+  constructor(scene, x, z, color = '#7ff7e6', y = 0, face = 0) {
+    this.scene = scene;
+    this.x = x;
+    this.z = z;
+    this.radius = 1.1;
+    this.color = color;
+    this.group = new THREE.Group();
+    const glow = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9 });
+    const frame = new THREE.Group();
+    for (const sx of [-0.42, 0.42]) {
+      const p = new THREE.Mesh(doorGeo.post, glow);
+      p.position.set(sx, 0.75, 0);
+      frame.add(p);
+    }
+    const top = new THREE.Mesh(doorGeo.lintel, glow);
+    top.position.y = 1.5;
+    frame.add(top);
+    frame.position.y = 0.9;
+    frame.rotation.y = face;
+    this.frame = frame;
+    const disc = new THREE.Mesh(doorGeo.disc, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.22, depthWrite: false, blending: THREE.AdditiveBlending }));
+    disc.scale.setScalar(this.radius);
+    disc.position.y = 0.04;
+    this.disc = disc;
+    this.group.add(frame, disc);
+    this.group.position.set(x, y, z);
+    scene.add(this.group);
+    this.t = Math.random() * 6;
+  }
+
+  update(dt) {
+    this.t += dt;
+    this.frame.position.y = 0.9 + Math.sin(this.t * 2.2) * 0.12;
+    this.disc.material.opacity = 0.16 + Math.sin(this.t * 3) * 0.06;
+  }
+
+  inside(x, z, extra = 0) {
+    const r = this.radius + extra;
+    return (x - this.x) ** 2 + (z - this.z) ** 2 < r * r;
+  }
+
+  set visible(on) { this.group.visible = on; }
+
+  remove() { this.scene.remove(this.group); }
+}
+
 /** A bouncing arrow that follows an entity (a target car or person). */
 export class TargetArrow {
   constructor(scene, color = '#ff4d4d') {
@@ -72,6 +131,9 @@ const PICKUP_LOOK = {
   ammo: { color: '#ffcf4d', emissive: '#b78100', geo: () => new THREE.BoxGeometry(0.5, 0.35, 0.35) },
   health: { color: '#ffffff', emissive: '#ff3b3b', geo: () => new THREE.BoxGeometry(0.55, 0.55, 0.2) },
   armor: { color: '#7ab8ff', emissive: '#1e5bd6', geo: () => new THREE.CylinderGeometry(0.35, 0.3, 0.5, 8) },
+  // story items: a ledger and an evidence case
+  ledger: { color: '#c9a25e', emissive: '#7a5a20', geo: () => new THREE.BoxGeometry(0.42, 0.1, 0.32) },
+  case: { color: '#9aa2ab', emissive: '#3a4a5a', geo: () => new THREE.BoxGeometry(0.6, 0.42, 0.16) },
 };
 
 export class Pickup {

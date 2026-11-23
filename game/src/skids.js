@@ -1,6 +1,6 @@
 // Tyre marks: whenever a car slides, brakes hard or spins its wheels, dark rubber strips are laid
 // on the road behind its rear wheels. A ring buffer of instanced quads keeps the newest 1600
-// pieces, so the streets slowly collect the history of every chase.
+// pieces, so the streets slowly collect the history of every chase. Boats leave none.
 import * as THREE from '../vendor/three.module.min.js';
 
 const COUNT = 1600;
@@ -34,8 +34,18 @@ export class SkidMarks {
     this.mesh.instanceMatrix.needsUpdate = true;
   }
 
+  /** Wipe the streets clean (a new game). */
+  clear() {
+    const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+    for (let i = 0; i < COUNT; i += 1) this.mesh.setMatrixAt(i, zero);
+    this.mesh.instanceMatrix.needsUpdate = true;
+    this.cursor = 0;
+  }
+
   update(vehicles, city) {
     for (const v of vehicles) {
+      // boats leave a wake, not rubber
+      if (v.spec.body === 'boat') continue;
       const sliding = !v.dead && v.speed > 4 && (v.skid > 0.45 || (v.input.handbrake && v.speed > 6) || (v.input.throttle < -0.5 && v.forward > 9));
       if (!sliding) { v.skidLast = null; continue; }
       const bike = v.spec.body === 'bike';

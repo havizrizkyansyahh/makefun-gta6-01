@@ -1,23 +1,27 @@
 // Runs the story and the side activities. Story missions start from a contact's marker, step
 // through the definitions in story.js with a small helper API (markers, dialogue, spawning gangs
-// and cars, counters), and pay out or fail. Beside them: courier runs from Bayline Couriers, the
-// Coastline Arms counter, saving at Kai's apartment, and twelve Sun Shells hidden in the city.
+// and cars, rooms, boats and news crews, counters), and pay out or fail. Beside them: courier
+// runs from Bayline Couriers, taxi fares, the Coastline Arms counter (inside the shop now), and
+// twelve Sun Shells hidden in the city. It also gathers every blip the maps show.
 import { MISSIONS, CAST } from './story.js';
 import { StreetRace } from './race.js';
 import { Marker, TargetArrow, Pickup } from './markers.js';
 import { Npc } from './npc.js';
 import { Vehicle, MODELS } from './vehicles.js';
 import { LaneDriver } from './traffic.js';
-import { LOOKS } from './human.js';
+import { Human, LOOKS } from './human.js';
 import { WEAPONS } from './combat.js';
+import { Helicopter } from './helicopter.js';
+import { PIER } from './city.js';
 import { makeRng } from './rng.js';
 
 export const SHOP = [
   { key: '1', label: 'Kestrel 9 pistol ammo (+24)', price: 60, buy: (p) => p.give('pistol', 24) },
-  { key: '2', label: 'Viper SMG / ammo (+64)', price: 0, smg: true },
-  { key: '3', label: 'Breaker 12 shotgun / shells (+12)', price: 0, shotgun: true },
-  { key: '4', label: 'Body armour', price: 500, buy: (p) => { p.armor = 100; } },
-  { key: '5', label: 'Med kit', price: 150, buy: (p) => { p.health = 100; } },
+  { key: '2', label: 'Viper SMG / ammo', price: 0, weapon: 'smg' },
+  { key: '3', label: 'Breaker 12 shotgun / shells', price: 0, weapon: 'shotgun' },
+  { key: '4', label: 'Gull Carbine / ammo', price: 0, weapon: 'carbine' },
+  { key: '5', label: 'Body armour', price: 500, buy: (p) => { p.armor = 100; } },
+  { key: '6', label: 'Med kit', price: 150, buy: (p) => { p.health = 100; } },
 ];
 
 export class Missions {
@@ -62,10 +66,8 @@ export class Missions {
     truck.mission = true;
     w.vehicles.push(truck);
     this.truck = truck;
-    // fixed activity markers
+    // fixed activity markers (Kai's apartment and Coastline Arms have doors of their own now)
     this.fixed = [
-      { key: 'safehouse', marker: new Marker(w.scene, pl.safehouse.x, pl.safehouse.z, pl.safehouse.color, 1.6, 0.18) },
-      { key: 'gunshop', marker: new Marker(w.scene, pl.gunshop.x, pl.gunshop.z, pl.gunshop.color, 1.6, 0.18) },
       { key: 'courier', marker: new Marker(w.scene, pl.courier.x, pl.courier.z, pl.courier.color, 1.6, 0.18) },
     ];
     // Sun Shells: twelve collectibles on sidewalks, the beach, the pier and in the parks
@@ -92,6 +94,36 @@ export class Missions {
 
   next() { return MISSIONS.find((m) => !this.completed.has(m.id)) || null; }
 
+  /** Is Kai already doing something (a mission, a job, a race, a range session, a repo)? */
+  busy() {
+    const w = this.world;
+    return !!(this.active || this.side || (this.race && this.race.active) || (w.activities && w.activities.busy()) || (w.garage && w.garage.repo));
+  }
+
+  // ------------------------------------------------------------ the Coastline Arms counter
+  /** The counter's price list, priced for what Kai already carries. */
+  shopRows() {
+    const p = this.world.player;
+    return SHOP.map((s) => {
+      let price = s.price;
+      let label = s.label;
+      if (s.weapon) {
+        const spec = WEAPONS[s.weapon];
+        const owned = p.weapons[s.weapon].owned;
+        price = owned ? spec.ammoPrice : spec.price;
+        label = owned ? `${spec.name} ammo (+${spec.ammoPack})` : spec.name;
+      }
+      return { key: s.key, label, price };
+    });
+  }
+
+  /** Standing at the counter: show the list, buy with the number keys. */
+  serveCounter(input) {
+    const w = this.world;
+    w.hud.shop(this.shopRows(), 'COASTLINE ARMS');
+    for (const s of SHOP) if (input.hit(`Digit${s.key}`)) { input.consume(`Digit${s.key}`); this.buy(s); }
+  }
+
   // ------------------------------------------------------------ helper API for story steps
   makeCtx(def) {
     const w = this.world;
@@ -105,6 +137,8 @@ export class Missions {
       spawned: [],
       cars: [],
       pickups: [],
+      cleanups: [],
+      ticks: [],
       get px() { return w.player.where().x; },
       get pz() { return w.player.where().z; },
       place: (k) => w.city.places[k],
@@ -134,12 +168,79 @@ export class Missions {
         }
         return list;
       },
-      spawnBoss(x, z) {
-        const b = new Npc(w, 'saint', x, z, { look: LOOKS.calder, state: 'guard', mission: def.id, health: 260, weapon: 'smg', accuracy: 1.1 });
+      /** A named boss: Halo Calder by default, or opts { look, name, icon, health, weapon }. */
+      spawnBoss(x, z, opts = {}) {
+        const b = new Npc(w, 'saint', x, z, { look: opts.look || LOOKS.calder, state: 'guard', mission: def.id, health: opts.health || 260, weapon: opts.weapon || 'smg', accuracy: 1.1 });
         b.boss = true;
+        b.bossName = opts.name || 'Halo Calder';
+        b.bossIcon = opts.icon || 'halo';
         w.npcs.push(b);
         ctx.spawned.push(b);
         return b;
+      },
+      /** Hired muscle in a given look (the harbour board's dock crews), hostile like the Saints. */
+      spawnCrew(x, z, n, spread, look) {
+        const list = ctx.spawnGang(x, z, n, spread);
+        for (const g of list) {
+          const old = g.human;
+          w.scene.remove(old.root);
+          g.human = new Human(look);
+          g.human.setWeapon(g.weapon);
+          w.scene.add(g.human.root);
+          g.crew = true;
+          g.sync();
+        }
+        return list;
+      },
+      room: (key) => w.interiors.get(key),
+      inRoom: (key) => !!w.interior && w.interior.key === key,
+      /** Run fn when the mission ends, passed or failed (put back what it borrowed). */
+      onCleanup(fn) { ctx.cleanups.push(fn); },
+      /** Run fn(dt) every frame while the mission is on. */
+      every(fn) { ctx.ticks.push(fn); },
+      /** Nadia's food truck leaves the beach for the length of the mission. */
+      hideTruck() {
+        const t = self.truck;
+        if (t.hidden) return;
+        t.hidden = { x: t.pos.x, z: t.pos.z, heading: t.heading };
+        t.pos.x += 5000;
+        t.mesh.visible = false;
+        t.sync();
+        ctx.onCleanup(() => self.showTruck());
+      },
+      /** The van Kai brought home becomes the truck on the sand again. */
+      restoreTruck(v) {
+        if (w.player.vehicle === v) w.player.exitVehicle();
+        v.remove();
+        const i = w.vehicles.indexOf(v);
+        if (i >= 0) w.vehicles.splice(i, 1);
+        ctx.cars = ctx.cars.filter((c) => c !== v);
+        self.showTruck();
+      },
+      /** The driver gives up: the vehicle coasts to a stop with nobody at the wheel. */
+      stopVehicle(v) {
+        v.ai = null;
+        v.driver = null;
+        v.input.throttle = 0;
+        v.input.steer = 0;
+        v.input.handbrake = true;
+        v.locked = true;
+      },
+      /** Make sure there is a speedboat tied up at the end of the pier. */
+      ensureBoat() {
+        const ok = w.vehicles.some((v) => v.spec.body === 'boat' && !v.dead && !v.mission && Math.hypot(v.pos.x - PIER.x, v.pos.z - PIER.z1) < 45);
+        if (ok) return;
+        const boat = new Vehicle(w.scene, 'marisol', '#f4f4f0', PIER.x + 6.5, PIER.z1 - 12, 0);
+        boat.kind = 'parked';
+        w.vehicles.push(boat);
+      },
+      /** Channel 6's helicopter, circling over a point for the rest of the mission. */
+      newsHeli(focus) {
+        const h = new Helicopter(w, focus.x + 200, focus.z + 100, { news: true, focus });
+        h.pos.y = 55;
+        ctx.every((dt) => h.update(dt));
+        ctx.onCleanup(() => h.remove());
+        return h;
       },
       spawnCar(model, x, z, heading, opts = {}) {
         const v = new Vehicle(w.scene, model, MODELS[model].colors[0], x, z, heading);
@@ -228,6 +329,8 @@ export class Missions {
     const a = this.active;
     if (!a) return;
     const c = a.ctx;
+    for (const fn of c.cleanups) fn();
+    c.cleanups.length = 0;
     for (const m of c.markers) m.remove();
     c.clearArrows();
     for (const p of c.pickups) if (!p.taken) { p.remove(); }
@@ -272,9 +375,25 @@ export class Missions {
 
   /** Called when the player is wasted or busted. */
   onPlayerDown() {
+    const w = this.world;
+    if (w.activities) w.activities.onPlayerDown();
+    if (w.garage && w.garage.repo) w.garage.endRepo(false, 'Repo job over.');
     if (this.active) this.fail('You can retry from the contact.');
     if (this.side && this.side.kind === 'taxi') this.dropPassenger(null);
     if (this.side) this.endSide(false, this.side.kind === 'taxi' ? 'Taxi shift over.' : 'Courier run failed.');
+  }
+
+  /** Put Nadia's truck back on the sand where it lives. */
+  showTruck() {
+    const t = this.truck;
+    if (!t.hidden) return;
+    t.pos.x = t.hidden.x;
+    t.pos.z = t.hidden.z;
+    t.heading = t.hidden.heading;
+    t.hidden = null;
+    t.mesh.visible = true;
+    t.repair();
+    t.sync();
   }
 
   clearContact() {
@@ -442,17 +561,20 @@ export class Missions {
     const p = w.player;
     let price = item.price;
     let action = item.buy;
-    if (item.smg || item.shotgun) {
-      const key = item.smg ? 'smg' : 'shotgun';
+    let label = item.label;
+    if (item.weapon) {
+      const key = item.weapon;
       const spec = WEAPONS[key];
-      price = p.weapons[key].owned ? spec.ammoPrice : spec.price;
+      const owned = p.weapons[key].owned;
+      price = owned ? spec.ammoPrice : spec.price;
+      label = owned ? `${spec.name} ammo` : spec.name;
       action = (pl) => pl.give(key, spec.ammoPack);
     }
     if (w.money < price) { w.hud.notify('Not enough cash.'); w.audio.ui('fail'); return; }
     w.money -= price;
     action(p);
-    w.audio.ui('cash');
-    w.hud.notify(`Bought: ${item.label}`);
+    w.audio.ui('register');
+    w.hud.notify(`Bought: ${label}`);
   }
 
   // ------------------------------------------------------------ per-frame
@@ -480,6 +602,7 @@ export class Missions {
         if (e.dead && !e.spec) { ar.mesh.visible = false; continue; }
         ar.follow(dt, e.pos.x, (e.y || 0) + (e.spec ? e.spec.hgt + 1.6 : 2.6), e.pos.z);
       }
+      for (const fn of c.ticks) fn(dt);
       const step = a.def.steps[a.step];
       if (step && step.update(c, dt) === true && this.active === a) this.advance();
     } else if (!p.dead && this.cooldown <= 0) {
@@ -498,34 +621,21 @@ export class Missions {
         const slow = !p.vehicle || p.vehicle.speed < 3;
         const inside = this.contactMarker.inside(at.x, at.z, 0.5);
         if (!inside && !this.contactMarker.inside(at.x, at.z, 2)) this.armed = true;
+        const otherJob = this.side || this.race.active || w.activities.busy() || w.garage.repo;
         if (!this.armed && inside) w.hud.help('Step out of the marker and back in to start the next mission.');
-        else if (slow && inside && !this.side && !this.race.active && w.police.stars === 0) this.start(next);
+        else if (slow && inside && otherJob) w.hud.help('Finish the job you are on before starting a mission.');
+        else if (slow && inside && w.police.stars === 0) this.start(next);
         else if (slow && this.contactMarker.inside(at.x, at.z, 0.5) && w.police.stars > 0) w.hud.help('Lose the cops before starting a mission.');
       }
     }
 
-    // fixed places: save, shop, courier
-    if (!p.vehicle && !p.dead) {
+    // fixed places: the courier depot
+    if (!p.vehicle && !p.dead && !w.ui) {
       for (const f of this.fixed) {
         if (!f.marker.inside(at.x, at.z, 0.3)) continue;
-        if (f.key === 'safehouse') {
-          w.hud.help('Press E to save your game.');
-          if (input.hit('KeyE')) { w.save(); w.hud.notify('Game saved.'); w.audio.ui('select'); }
-        } else if (f.key === 'gunshop') {
-          w.hud.shop(SHOP.map((s) => {
-            let price = s.price;
-            let label = s.label;
-            if (s.smg || s.shotgun) {
-              const key = s.smg ? 'smg' : 'shotgun';
-              price = p.weapons[key].owned ? WEAPONS[key].ammoPrice : WEAPONS[key].price;
-              label = p.weapons[key].owned ? `${WEAPONS[key].name} ammo (+${WEAPONS[key].ammoPack})` : `${WEAPONS[key].name}`;
-            }
-            return { key: s.key, label, price };
-          }));
-          for (const s of SHOP) if (input.hit(`Digit${s.key}`)) this.buy(s);
-        } else if (f.key === 'courier' && !this.active && !this.side) {
+        if (f.key === 'courier' && !this.busy()) {
           w.hud.help('Press E to start a courier run.');
-          if (input.hit('KeyE')) this.startCourier();
+          if (input.hit('KeyE')) { input.consume('KeyE'); this.startCourier(); }
         }
       }
     }
@@ -533,7 +643,7 @@ export class Missions {
     this.race.update(dt, input);
 
     // in a cab with nothing else going on: offer taxi work
-    if (!this.side && !this.active && p.vehicle && p.vehicle.spec.taxi && !p.dead) {
+    if (!this.busy() && p.vehicle && p.vehicle.spec.taxi && !p.dead) {
       w.hud.help('Press T to start taking taxi fares.');
       if (input.hit('KeyT')) this.startTaxi();
     }
@@ -554,7 +664,7 @@ export class Missions {
         this.nextDelivery();
         if (!this.side) this.timer = null;
       }
-    } else if (!this.active) this.timer = null;
+    } else if (!this.active && !this.race.active) this.timer = null;
   }
 
   /**
@@ -564,11 +674,13 @@ export class Missions {
   blips() {
     const out = [];
     const pl = this.world.city.places;
+    const w = this.world;
     const PLACE_INFO = {
-      safehouse: { icon: 'house', title: "Kai's apartment", desc: 'Stand in the green marker and press E to save your game.' },
-      gunshop: { icon: 'gun', title: 'Coastline Arms', desc: 'Guns, ammunition, body armour and med kits.' },
       courier: { icon: 'box', title: 'Bayline Couriers', desc: 'Courier runs: three parcels against the clock.' },
     };
+    if (w.interiors) out.push(...w.interiors.blips());
+    if (w.garage) out.push(...w.garage.blips());
+    if (w.activities) out.push(...w.activities.blips());
     for (const f of this.fixed) {
       const info = PLACE_INFO[f.key];
       out.push({ x: f.marker.x, z: f.marker.z, color: pl[f.key].color, kind: 'place', icon: info.icon, title: info.title, desc: info.desc });
@@ -587,18 +699,21 @@ export class Missions {
     if (this.active) {
       const c = this.active.ctx;
       const step = this.active.def.steps[this.active.step];
-      for (const m of c.markers) out.push({ x: m.x, z: m.z, color: '#ffd23f', kind: 'objective', edge: true, icon: 'objective', title: this.active.def.title, desc: step ? step.text : '' });
+      // things inside a room show at the room's door on the maps (unless Kai is in there too)
+      const map = (x, z) => (w.interiors && !w.interior ? w.interiors.toMap(x, z) : { x, z });
+      for (const m of c.markers) out.push({ ...map(m.x, m.z), color: '#ffd23f', kind: 'objective', edge: true, icon: 'objective', title: this.active.def.title, desc: step ? step.text : '' });
       for (const n of c.spawned) {
         if (n.dead) continue;
-        if (n.boss) out.push({ x: n.pos.x, z: n.pos.z, color: '#ff4d4d', kind: 'target', edge: true, icon: 'halo', title: 'Halo Calder', desc: 'Boss of the Glass Saints.' });
-        else out.push({ x: n.pos.x, z: n.pos.z, color: '#ff4d4d', kind: 'enemy', title: 'Glass Saint', desc: 'Armed and hostile.' });
+        const at = map(n.pos.x, n.pos.z);
+        if (n.boss) out.push({ ...at, color: '#ff4d4d', kind: 'target', edge: true, icon: n.bossIcon || 'halo', title: n.bossName || 'Halo Calder', desc: n.bossIcon === 'halo' ? 'Boss of the Glass Saints.' : 'One of Captain Hollis\'s people.' });
+        else out.push({ ...at, color: '#ff4d4d', kind: 'enemy', title: n.crew ? 'Harbour crew' : 'Glass Saint', desc: 'Armed and hostile.' });
       }
       for (const a of c.arrows) {
         if (a.entity.dead && !a.entity.spec) continue;
         if (a.entity.boss) continue;
-        out.push({ x: a.entity.pos.x, z: a.entity.pos.z, color: '#ff4d4d', kind: 'target', edge: true, title: a.entity.spec ? a.entity.spec.name : 'Target', desc: step ? step.text : '' });
+        out.push({ ...map(a.entity.pos.x, a.entity.pos.z), color: '#ff4d4d', kind: 'target', edge: true, title: a.entity.spec ? a.entity.spec.name : 'Target', desc: step ? step.text : '' });
       }
-      for (const p of c.pickups) if (!p.taken) out.push({ x: p.x, z: p.z, color: '#6dff8a', kind: 'objective', edge: true, icon: 'objective', title: this.active.def.title, desc: step ? step.text : '' });
+      for (const p of c.pickups) if (!p.taken) out.push({ ...map(p.x, p.z), color: '#6dff8a', kind: 'objective', edge: true, icon: 'objective', title: this.active.def.title, desc: step ? step.text : '' });
     }
     out.push(...this.race.blips());
     if (this.side && this.side.marker) {
@@ -610,8 +725,11 @@ export class Missions {
 
 
   objective() {
+    const w = this.world;
     const race = this.race && this.race.objective();
     if (race) return race;
+    const job = (w.activities && w.activities.objective()) || (w.garage && w.garage.objective());
+    if (job) return job;
     if (this.active) {
       const step = this.active.def.steps[this.active.step];
       return { title: this.active.def.title, text: this.counter || (step ? step.text : '') };
@@ -623,7 +741,8 @@ export class Missions {
     const next = this.next();
     if (next) {
       const who = next.giver === 'nadia' ? 'Nadia at the Sol y Sal truck' : 'Pearl at Spin City Laundry';
-      return { title: 'Story', text: `Meet ${who}: follow her portrait on the map.` };
+      const act = MISSIONS.indexOf(next) >= MISSIONS.findIndex((m) => m.id === 'hot-plates') ? 'Story · Act II' : 'Story';
+      return { title: act, text: `Meet ${who}: follow her portrait on the map.` };
     }
     return null;
   }

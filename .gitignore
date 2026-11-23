@@ -1,2 +1,6 @@
 out/
 .DS_Store
+# local editor and agent settings (the dev-server launch config)
+.claude/
+# logs from local runs of serve.ts or the capture tool
+*.log

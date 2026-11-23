@@ -1,9 +1,12 @@
 // Menus: the title screen over a slow flight across the bay (Continue with the save's summary,
-// New Game, Controls, Settings, Credits), the pause menu (Resume, Map, Save, Stats, Controls,
-// Settings, Quit), the settings that are kept between sessions, and keyboard navigation.
-import { SETTINGS_KEY } from './config.js';
+// New Game, Controls, Settings, Credits), the pause menu (Resume, Map, Activities, Save, Stats,
+// Controls, Settings, Quit), the settings that are kept between sessions, and keyboard
+// navigation.
+import { SETTINGS_KEY, RANGE, BUOY_RUN } from './config.js';
 import { MISSIONS } from './story.js';
 import { MapView } from './mapview.js';
+import { MODELS } from './vehicles.js';
+import { formatTime, dollars } from './rng.js';
 
 export const DEFAULT_SETTINGS = { sensitivity: 1, invertY: false, master: 0.8, music: 0.55, density: 1, difficulty: 1 };
 
@@ -27,14 +30,17 @@ const CONTROLS = [
   ['F', 'Enter, steal or leave a vehicle'],
   ['Left mouse', 'Shoot / punch'],
   ['Right mouse', 'Aim down the sights'],
-  ['Q / wheel / 1-4', 'Switch weapon'],
+  ['Q / wheel / 1-5', 'Switch weapon'],
   ['Tab (hold)', 'Weapon wheel, time slows'],
   ['R', 'Reload / next radio station'],
-  ['E', 'Interact (save, shops, jobs)'],
+  ['E', 'Doors, counters, the garage bay, jobs and races'],
+  ['W S / A D, Enter', 'Shop and garage screens: choose, change, buy'],
+  ['1-6 (at the counter)', 'Buy at Coastline Arms'],
   ['H', 'Horn'],
   ['C (driving)', 'Look behind'],
   ['T (in a Marlin Cab)', 'Start / stop taxi fares'],
   ['M', 'City map'],
+  ['P', 'Photo mode (F cycles filters)'],
   ['Backspace', 'Skip a line of dialogue'],
   ['Esc', 'Pause'],
 ];
@@ -157,6 +163,7 @@ export class Menu {
       items: [
         { label: 'Resume', action: () => this.emit('resume') },
         { label: 'Map', action: () => this.map(world) },
+        { label: 'Activities', note: 'Side jobs, records and medals', action: () => this.activities(world) },
         { label: 'Save Game', note: 'Saves here and now', action: () => { const ok = world.save(); this.toast(ok ? 'Game saved' : 'Saving is blocked in this browser'); } },
         { label: 'Stats', action: () => this.stats(world) },
         { label: 'Controls', action: () => this.controls() },
@@ -179,14 +186,22 @@ export class Menu {
     const hud = world.hud;
     const done = world.missions.completed.size;
     const next = world.missions.next();
-    const finale = !next || next.id === 'glass-houses';
+    const order = (id) => MISSIONS.findIndex((m) => m.id === id);
+    const reached = (id) => !next || MISSIONS.indexOf(next) >= order(id);
+    const finale = reached('glass-houses');
+    const haloDone = world.missions.completed.has('glass-houses');
+    const hollisKnown = reached('hot-plates');
+    const hollisDone = world.missions.completed.has('low-tide');
     const people = [
       ['kai', 'Kai Moreno', 'You. Back from six years on the northern boats.', `$${Math.floor(world.money).toLocaleString('en-US')} · health ${Math.round(world.player.health)}`],
       ['nadia', 'Nadia Moreno', "Kai's sister. Runs the Sol y Sal food truck on Palmline Beach.", next && next.giver === 'nadia' ? `Has work for you: ${next.title}` : 'On the beach'],
       ['pearl', 'Auntie Pearl', 'Spin City Laundry. Launders more than shirts.', next && next.giver === 'pearl' ? `Has work for you: ${next.title}` : 'At the laundry'],
-      ['halo', finale ? 'Halo Calder' : '???', finale ? 'Boss of the Glass Saints, up in Corvel Heights.' : 'Whoever runs the Glass Saints.', finale ? 'Wanted: by you' : 'Unknown'],
+      ['ines', 'Ines Okafor', 'Torque & Tide Customs. Fixes anything, asks nothing.', 'Repo jobs on offer'],
+      hollisKnown
+        ? ['hollis', 'Captain Hollis', 'SBPD. The name on every page of the ledger.', hollisDone ? 'In custody' : 'Wanted: by you']
+        : ['halo', finale ? 'Halo Calder' : '???', finale ? 'Boss of the Glass Saints, up in Corvel Heights.' : 'Whoever runs the Glass Saints.', haloDone ? 'Dead' : finale ? 'Wanted: by you' : 'Unknown'],
     ];
-    const legend = [['house', "Kai's apartment: save"], ['gun', 'Coastline Arms'], ['box', 'Bayline Couriers'], ['flag', 'Bayside Run'], ['hospital', 'St. Amara Medical'], ['police', 'Solmara Bay PD'], ['objective', 'Objective'], ['waypoint', 'Waypoint']];
+    const legend = [['house', "Kai's apartment"], ['gun', 'Coastline Arms'], ['laundry', 'Spin City Laundry'], ['shirt', 'Threadline Outfitters'], ['wrench', 'Torque & Tide'], ['box', 'Bayline Couriers'], ['flag', 'Bayside Run'], ['buoy', 'Buoy Run'], ['hospital', 'St. Amara Medical'], ['police', 'Solmara Bay PD'], ['objective', 'Objective'], ['waypoint', 'Waypoint']];
     this.push({
       kind: 'map',
       body: `<div class="mapwrap">
@@ -213,7 +228,7 @@ export class Menu {
           const S = view.canvas.width;
           if (act === 'in') view.zoomAt(S / 2, S / 2, 1.4);
           else if (act === 'out') view.zoomAt(S / 2, S / 2, 1 / 1.4);
-          else if (act === 'kai') { const at = world.where(); view.focus(at.x, at.z, Math.max(view.zoom, 2.5)); }
+          else if (act === 'kai') { const at = world.mapPos(); view.focus(at.x, at.z, Math.max(view.zoom, 2.5)); }
           else world.clearWaypoint();
           this.audio.ui('move');
         }));
@@ -223,15 +238,44 @@ export class Menu {
 
 
 
+  /** Side jobs and the records kept for each. */
+  activities(world) {
+    const a = world.activities;
+    const g = world.garage;
+    const medal = (m) => (m ? `<span class="medal ${m.toLowerCase()}">${m}</span>` : '');
+    const rows = [
+      ['Bayside Run', 'Street race in Little Marisco and Midtown. Drive into the chequered marker, press E.', world.missions.race.best ? `best ${formatTime(world.missions.race.best)}` : 'not won yet'],
+      ['Buoy Run', 'Boat trial round nine buoys in the bay. Start at the beam off the pier.', `${Number.isFinite(a.buoys.best) ? `best ${formatTime(a.buoys.best)}` : 'no time yet'} ${medal(a.buoys.medal)}`, `gold ${formatTime(BUOY_RUN.medals[0].time)}`],
+      ['Coastline Arms range', 'Booth 4 behind the gun shop. Forty seconds, six lanes.', `${a.range.best ? `best ${a.range.best}` : 'no score yet'} ${medal(a.range.medal)}`, `gold ${RANGE.medals[0].score}`],
+      ['Repo jobs', 'From Ines at Torque & Tide, on foot.', `${g.repos} done`],
+      ['Courier runs', 'Bayline Couriers, three parcels against the clock.', `${world.stats.deliveries} parcels`],
+      ['Sol y Sal deliveries', "Walk up to Nadia's truck and press E: three taco orders on the bike, served hot.", a.tacos.best ? `best shift ${dollars(a.tacos.best)}` : 'no shift yet'],
+      ['Taxi fares', 'Press T in any Marlin Cab.', ''],
+      ['Threadline Outfitters', 'Tops, jackets, trousers, shoes, hats, shades and gold.', `${world.outfits.count()} / ${world.outfits.total()} pieces`],
+      ['Your car', 'Keep a car at Torque & Tide and it waits outside the apartment.', g.personal ? MODELS[g.personal.model].name : 'none yet'],
+      ['Sun Shells', 'Twelve hidden around the city.', `${world.missions.shellsFound.size} / 12`],
+    ];
+    this.push({
+      kind: 'info',
+      title: 'ACTIVITIES',
+      body: `<table class="kv acts">${rows.map(([k, d, v, x]) => `<tr><td><b>${k}</b><small>${d}</small></td><td>${v}${x ? `<small>${x}</small>` : ''}</td></tr>`).join('')}</table>`,
+      items: [{ label: 'Back', action: () => this.back() }],
+    });
+  }
+
   stats(world) {
     const s = world.stats;
     const mins = Math.floor(s.played / 60);
     const rows = [
       ['Story missions', `${world.missions.completed.size} / ${MISSIONS.length}`],
       ['Sun Shells', `${world.missions.shellsFound.size} / 12`],
-      ['Cash', `$${Math.floor(world.money).toLocaleString('en-US')}`],
+      ['Cash', dollars(world.money)],
       ['Vehicles taken', s.stolen],
-      ['Courier parcels', s.deliveries],
+      ['Courier parcels and fares', s.deliveries],
+      ['Repo jobs', s.repos || 0],
+      ['Garage work done', s.mods || 0],
+      ['Clothes bought', s.clothes || 0],
+      ['Doors walked through', s.visits || 0],
       ['Takedowns', s.kills],
       ['Officers down', s.cops],
       ['Crashes', s.crashes],
@@ -277,8 +321,9 @@ export class Menu {
       title: 'CREDITS',
       body: `<div class="credits">
         <p><b>Solmara Bay</b> is an original game: its city, people, cars, story and music were all made for it.</p>
-        <p>Kai Moreno &middot; Nadia Moreno &middot; Auntie Pearl &middot; Dex Rourke &middot; Halo Calder &middot; the Glass Saints &middot; the Solmara Bay PD</p>
-        <p>Radio: WAVE 88.1, BAYSIDE 94.7 and LOW TIDE FM, composed live by the game's own sequencer.</p>
+        <p>Kai Moreno &middot; Nadia Moreno &middot; Auntie Pearl &middot; Dex Rourke &middot; Halo Calder &middot; Captain Hollis &middot; Sergeant Vey &middot; Ines Okafor &middot; the Glass Saints &middot; the harbour board &middot; the Solmara Bay PD &middot; Channel 6 Bay News</p>
+        <p>Spin City Laundry, Coastline Arms, Threadline Outfitters, Torque &amp; Tide Customs and Bayline Couriers are the city's own businesses.</p>
+        <p>Radio: WAVE 88.1, BAYSIDE 94.7, LOW TIDE FM and SEAGLASS 101.3, composed live by the game's own sequencer.</p>
         <p>Rendering by three.js (MIT). Everything else is the game's own code.</p>
       </div>`,
       items: [{ label: 'Back', action: () => this.back() }],

@@ -1,6 +1,7 @@
 // Traffic signals: every inner intersection gets four signal masts (one per approach) whose red,
 // amber and green lamps cycle on a timer, staggered across the grid. Traffic asks state() before
-// it crosses and waits at the stop line on red; the lamps glow (and bloom) at night.
+// it crosses and waits at the stop line on red; the lamps glow (and bloom) at night, and in the
+// small hours the whole grid drops to flashing amber.
 import * as THREE from '../vendor/three.module.min.js';
 import { CITY } from './config.js';
 import { mat4 } from './geometry.js';
@@ -41,8 +42,10 @@ export class Signals {
       list.forEach((x, i) => m.setMatrixAt(i, x));
       m.castShadow = true;
       scene.add(m);
+      this.meshes.push(m);
       return m;
     };
+    this.meshes = [];
     inst(new THREE.CylinderGeometry(0.09, 0.12, 5.8, 8), metal, poles);
     inst(new THREE.BoxGeometry(0.1, 0.1, 4.4), metal, arms);
     inst(new THREE.BoxGeometry(0.42, 1.25, 0.32), new THREE.MeshStandardMaterial({ color: '#1b1d21', roughness: 0.6 }), boxes);
@@ -69,10 +72,14 @@ export class Signals {
     return ((n.i * 3 + n.j * 7) % 10) * 2;
   }
 
-  /** 'green' | 'amber' | 'red' for traffic moving along axis ('x' or 'z') into node. */
+  /**
+   * 'green' | 'amber' | 'red' for traffic moving along axis ('x' or 'z') into node; in the small
+   * hours ('flash') every inner junction blinks amber and drivers slow down and go on through.
+   */
   state(node, axis) {
     const n = this.city.nodes[node];
     if (n.i === 0 || n.j === 0 || n.i === N || n.j === N) return 'green';
+    if (this.flashing) return 'flash';
     const t = (this.time + this.offset(node)) % CYCLE;
     const local = axis === 'x' ? t : (t + CYCLE / 2) % CYCLE;
     if (local < GREEN) return 'green';
@@ -80,18 +87,27 @@ export class Signals {
     return 'red';
   }
 
-  update(dt) {
+  update(dt, hour = 12) {
     this.time += dt;
     this.tick -= dt;
+    // between 01:30 and 05:00 the lights go to flashing amber
+    this.flashing = hour > 1.5 && hour < 5;
     if (this.tick > 0) return;
     this.tick = 0.2;
     const [red, amber, green] = this.lamps;
+    const blink = Math.floor(this.time * 1.6) % 2 === 0;
     this.heads.forEach((h, i) => {
-      const s = this.state(h.node, h.axis);
+      let s = this.state(h.node, h.axis);
+      if (s === 'flash') s = blink ? 'amber' : 'off';
       red.setColorAt(i, s === 'red' ? this.colors.red : this.colors.off);
       amber.setColorAt(i, s === 'amber' ? this.colors.amber : this.colors.off);
       green.setColorAt(i, s === 'green' ? this.colors.green : this.colors.off);
     });
     for (const m of this.lamps) m.instanceColor.needsUpdate = true;
+  }
+
+  /** Hide the masts while Kai is indoors (nothing outside can be seen anyway). */
+  setVisible(on) {
+    for (const m of this.meshes) m.visible = on;
   }
 }

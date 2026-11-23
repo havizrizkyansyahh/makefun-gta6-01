@@ -1,6 +1,7 @@
 // Every texture in the game is painted here on a canvas at load time: building facades (with a
-// matching night map of lit windows), sidewalk tiles, asphalt, grass, sand and the glow sprite.
-// Nothing is loaded from a file, so the game ships no images at all.
+// matching night map of lit windows), sidewalk tiles, asphalt, grass, sand, the glow sprite, and
+// for the interiors floors (tile, wood, concrete, carpet), walls, the bay seen through a window,
+// shop labels and posters. Nothing is loaded from a file, so the game ships no images at all.
 import * as THREE from '../vendor/three.module.min.js';
 import { makeRng } from './rng.js';
 
@@ -278,4 +279,225 @@ export function smokeTexture() {
     g.fillRect(0, 0, 64, 64);
   }
   return finish(c, false);
+}
+
+// ------------------------------------------------------------------ interiors
+
+/**
+ * Floors for the rooms, one tile per metre-ish of floor (callers set repeat): 'tile' is a
+ * two-tone chequer (the laundry), 'wood' planks (Kai's apartment), 'concrete' a sealed slab with
+ * expansion joints (the gun shop and range), 'carpet' a soft woven pile (the boutique).
+ * Returns { map, normal }.
+ */
+export function floorTexture(kind) {
+  const rng = makeRng(kind.length * 17 + 3);
+  const S = 256;
+  const [c, g] = canvas(S, S);
+  const [h, hg] = canvas(S, S);
+  hg.fillStyle = '#9a9a9a';
+  hg.fillRect(0, 0, S, S);
+  if (kind === 'tile') {
+    const n = 4;
+    const t = S / n;
+    for (let y = 0; y < n; y += 1) {
+      for (let x = 0; x < n; x += 1) {
+        g.fillStyle = (x + y) % 2 ? '#e9e4d6' : '#3f9a94';
+        g.fillRect(x * t, y * t, t, t);
+      }
+    }
+    speckle(g, S, S, 900, rng, ['rgba(0,0,0,0.05)', 'rgba(255,255,255,0.06)'], 2);
+    hg.strokeStyle = '#3a3a3a';
+    hg.lineWidth = 3;
+    g.strokeStyle = 'rgba(40,40,40,0.35)';
+    g.lineWidth = 2;
+    for (let k = 0; k <= n; k += 1) {
+      for (const ctx of [g, hg]) {
+        ctx.beginPath(); ctx.moveTo(k * t, 0); ctx.lineTo(k * t, S); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, k * t); ctx.lineTo(S, k * t); ctx.stroke();
+      }
+    }
+  } else if (kind === 'wood') {
+    const rows = 6;
+    const rh = S / rows;
+    for (let r = 0; r < rows; r += 1) {
+      let x = -rng.range(0, 120);
+      while (x < S) {
+        const len = rng.range(90, 170);
+        const tone = rng.range(-12, 12);
+        g.fillStyle = `hsl(${28 + rng.range(-4, 4)}, ${42 + tone * 0.5}%, ${44 + tone}%)`;
+        g.fillRect(x, r * rh, len, rh);
+        // grain lines along the plank
+        for (let k = 0; k < 7; k += 1) {
+          g.strokeStyle = `rgba(70,40,20,${rng.range(0.08, 0.2)})`;
+          g.lineWidth = 1;
+          const y = r * rh + rng.range(3, rh - 3);
+          g.beginPath();
+          g.moveTo(x, y);
+          g.bezierCurveTo(x + len * 0.3, y + rng.range(-3, 3), x + len * 0.7, y + rng.range(-3, 3), x + len, y);
+          g.stroke();
+        }
+        g.fillStyle = 'rgba(40,24,12,0.55)';
+        g.fillRect(x, r * rh, 2, rh);
+        hg.fillStyle = '#404040';
+        hg.fillRect(x, r * rh, 2, rh);
+        x += len;
+      }
+      g.fillStyle = 'rgba(40,24,12,0.5)';
+      g.fillRect(0, r * rh, S, 2);
+      hg.fillStyle = '#404040';
+      hg.fillRect(0, r * rh, S, 2);
+    }
+  } else if (kind === 'carpet') {
+    g.fillStyle = '#6b3550';
+    g.fillRect(0, 0, S, S);
+    speckle(g, S, S, 9000, rng, ['#7a3e5c', '#5e2d46', '#83486a', '#6f3a55'], 2);
+    g.strokeStyle = 'rgba(255,214,140,0.25)';
+    g.lineWidth = 3;
+    g.strokeRect(16, 16, S - 32, S - 32);
+    speckle(hg, S, S, 6000, rng, ['#a0a0a0', '#909090', '#b0b0b0'], 2);
+  } else {
+    g.fillStyle = '#8d8a84';
+    g.fillRect(0, 0, S, S);
+    speckle(g, S, S, 5000, rng, ['#85827c', '#96938c', '#7e7b75', '#9b9892'], 2);
+    for (let i = 0; i < 5; i += 1) {
+      g.fillStyle = 'rgba(60,55,50,0.08)';
+      g.beginPath();
+      g.ellipse(rng.next() * S, rng.next() * S, rng.range(20, 60), rng.range(12, 30), rng.next() * 3, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.fillStyle = 'rgba(40,38,35,0.6)';
+    g.fillRect(0, 0, S, 2);
+    g.fillRect(0, 0, 2, S);
+    hg.fillStyle = '#303030';
+    hg.fillRect(0, 0, S, 3);
+    hg.fillRect(0, 0, 3, S);
+  }
+  return { map: finish(c), normal: normalFromHeight(h, kind === 'carpet' ? 1.2 : 2.5) };
+}
+
+/**
+ * Wall finishes: 'paint' (a softly mottled emulsion with a skirting board along the bottom of
+ * the tile, tinted by the room's colour through the material), 'brick' (white-washed brick for
+ * the gun shop). One tile covers 4 m of wall horizontally and the full room height vertically.
+ */
+export function wallTexture(kind) {
+  const rng = makeRng(kind === 'brick' ? 41 : 43);
+  const S = 512;
+  const [c, g] = canvas(S, S);
+  const [h, hg] = canvas(S, S);
+  hg.fillStyle = '#808080';
+  hg.fillRect(0, 0, S, S);
+  if (kind === 'brick') {
+    g.fillStyle = '#d8d0c4';
+    g.fillRect(0, 0, S, S);
+    const bh = 24;
+    const bw = 64;
+    for (let y = 0; y < S; y += bh) {
+      const off = (y / bh) % 2 ? bw / 2 : 0;
+      for (let x = -bw; x < S + bw; x += bw) {
+        const tone = rng.range(-10, 8);
+        g.fillStyle = `hsl(${18 + rng.range(-5, 5)}, ${18 + tone * 0.3}%, ${80 + tone}%)`;
+        g.fillRect(x + off + 2, y + 2, bw - 4, bh - 4);
+        hg.fillStyle = '#b8b8b8';
+        hg.fillRect(x + off + 2, y + 2, bw - 4, bh - 4);
+      }
+    }
+  } else {
+    g.fillStyle = '#ffffff';
+    g.fillRect(0, 0, S, S);
+    for (let i = 0; i < 1600; i += 1) {
+      g.fillStyle = rng.chance(0.5) ? 'rgba(0,0,0,0.025)' : 'rgba(255,255,255,0.05)';
+      g.beginPath();
+      g.arc(rng.next() * S, rng.next() * S, rng.range(2, 9), 0, Math.PI * 2);
+      g.fill();
+    }
+  }
+  // skirting board along the floor
+  g.fillStyle = kind === 'brick' ? '#4a4038' : '#f4efe6';
+  g.fillRect(0, S - 22, S, 22);
+  g.fillStyle = 'rgba(0,0,0,0.25)';
+  g.fillRect(0, S - 23, S, 2);
+  hg.fillStyle = '#c0c0c0';
+  hg.fillRect(0, S - 22, S, 22);
+  return { map: finish(c), normal: normalFromHeight(h, 2) };
+}
+
+/**
+ * The bay seen through a window: sky, the sea's horizon, a strip of beach and a few palms, at the
+ * time of day given by hour (golden afternoon, dusk or night). Used on emissive window panes.
+ */
+export function windowViewTexture(hour = 17) {
+  const [c, g] = canvas(256, 192);
+  const night = hour < 6 || hour > 20;
+  const dusk = !night && hour > 18;
+  const sky = g.createLinearGradient(0, 0, 0, 120);
+  sky.addColorStop(0, night ? '#0b1230' : dusk ? '#5a5fae' : '#4a86d0');
+  sky.addColorStop(1, night ? '#2b2f66' : dusk ? '#ff9b6b' : '#ffd9a6');
+  g.fillStyle = sky;
+  g.fillRect(0, 0, 256, 120);
+  if (!night) {
+    g.fillStyle = dusk ? 'rgba(255,170,110,0.9)' : 'rgba(255,240,200,0.9)';
+    g.beginPath(); g.arc(180, 104, dusk ? 22 : 14, 0, Math.PI * 2); g.fill();
+  } else {
+    g.fillStyle = '#ffffff';
+    for (let i = 0; i < 30; i += 1) g.fillRect((i * 97) % 256, (i * 53) % 90, 1.5, 1.5);
+  }
+  const sea = g.createLinearGradient(0, 120, 0, 160);
+  sea.addColorStop(0, night ? '#14244a' : '#2aa3c4');
+  sea.addColorStop(1, night ? '#0a1530' : '#0f5f8f');
+  g.fillStyle = sea;
+  g.fillRect(0, 120, 256, 40);
+  g.fillStyle = night ? '#3a3a40' : '#f1dfb0';
+  g.fillRect(0, 160, 256, 32);
+  // palm silhouettes
+  g.strokeStyle = night ? '#05070f' : '#2f4a2c';
+  g.fillStyle = g.strokeStyle;
+  for (const [x, hgt] of [[36, 120], [214, 100], [120, 80]]) {
+    g.lineWidth = 4;
+    g.beginPath(); g.moveTo(x, 192); g.quadraticCurveTo(x + 8, 192 - hgt * 0.5, x + 4, 192 - hgt); g.stroke();
+    for (let k = 0; k < 7; k += 1) {
+      const a = (k / 7) * Math.PI * 2;
+      g.lineWidth = 3;
+      g.beginPath();
+      g.moveTo(x + 4, 192 - hgt);
+      g.quadraticCurveTo(x + 4 + Math.cos(a) * 16, 192 - hgt - 10, x + 4 + Math.cos(a) * 28, 192 - hgt + 10 + Math.abs(Math.sin(a)) * 6);
+      g.stroke();
+    }
+  }
+  return finish(c, false);
+}
+
+/**
+ * A painted label or poster: big text over a background colour with an optional second line,
+ * for shop counters, range lane numbers, posters and the TV's news channel.
+ */
+export function labelTexture(text, { fg = '#ffffff', bg = '#1d1f2b', sub = '', w = 512, h = 128, border = null, font = 'bold 54px' } = {}) {
+  const [c, g] = canvas(w, h);
+  g.fillStyle = bg;
+  g.fillRect(0, 0, w, h);
+  if (border) {
+    g.strokeStyle = border;
+    g.lineWidth = Math.max(4, h * 0.05);
+    g.strokeRect(g.lineWidth / 2, g.lineWidth / 2, w - g.lineWidth, h - g.lineWidth);
+  }
+  g.fillStyle = fg;
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.font = `${font} "Avenir Next", "Trebuchet MS", sans-serif`;
+  g.fillText(text, w / 2, sub ? h * 0.4 : h / 2, w * 0.92);
+  if (sub) {
+    g.font = `${Math.round(h * 0.18)}px "Avenir Next", "Trebuchet MS", sans-serif`;
+    g.globalAlpha = 0.85;
+    g.fillText(sub, w / 2, h * 0.76, w * 0.92);
+    g.globalAlpha = 1;
+  }
+  return finish(c, false);
+}
+
+/** A live canvas texture (the apartment TV): returns { canvas, ctx, texture }. */
+export function liveTexture(w, h) {
+  const [c, g] = canvas(w, h);
+  g.fillStyle = '#000';
+  g.fillRect(0, 0, w, h);
+  return { canvas: c, ctx: g, texture: finish(c, false) };
 }

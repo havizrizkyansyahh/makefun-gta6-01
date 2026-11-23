@@ -1,6 +1,8 @@
 // Vehicles of Solmara Bay: the models (built from boxes, with spinning and steering wheels,
 // head, tail and police lights) and the arcade driving model every car shares, whether the
-// player, a traffic driver or a police officer is at the wheel. Also car-to-car collisions.
+// player, a traffic driver or a police officer is at the wheel. Also car-to-car collisions, and
+// what Torque & Tide Customs can do to a car: engine, brakes and armour upgrades, respray,
+// underglow, window tint, rims and a full repair.
 import * as THREE from '../vendor/three.module.min.js';
 import { clamp, damp, wrapAngle } from './rng.js';
 import { mergeParts, mat4 } from './geometry.js';
@@ -19,7 +21,24 @@ export const MODELS = {
   sprint: { name: 'Sprint 250', body: 'bike', len: 2.1, wid: 0.8, hgt: 1.1, power: 15, top: 50, grip: 8.5, turn: 2.8, mass: 0.45, colors: ['#e63946', '#1d3557', '#ffb703', '#2ec4b6', '#f1faee'] },
   marisol: { name: 'Marisol 22', body: 'boat', len: 6.2, wid: 2.3, hgt: 1.7, power: 12, top: 30, grip: 2.4, turn: 1.15, mass: 1.6, colors: ['#f4f4f0', '#1d3557', '#e63946'] },
   halcyon: { name: 'Halcyon GT-R', body: 'coupe', len: 4.6, wid: 2.0, hgt: 1.1, power: 21, top: 64, grip: 8.2, turn: 2.35, mass: 1.25, colors: ['#bde0fe'] },
+  // a 40-foot motor yacht: slow, heavy, a cabin and a flybridge (Captain Hollis's way out)
+  tidecaller: { name: 'Tidecaller 40', body: 'boat', len: 12, wid: 3.8, hgt: 3.4, power: 8.5, top: 21, grip: 1.9, turn: 0.55, mass: 4.5, colors: ['#f4f4f0'], yacht: true, deck: 1.15 },
 };
+
+/** Respray colours at Torque & Tide, and the underglow and rim choices. */
+export const PAINTS = [
+  ['Coral Red', '#e63946'], ['Sunburst', '#ffb703'], ['Lagoon', '#2ec4b6'], ['Pearl White', '#f1faee'],
+  ['Midnight', '#111111'], ['Bay Blue', '#1d6fb8'], ['Orchid', '#9b5de5'], ['Lime Twist', '#90be6d'],
+  ['Sunset Orange', '#fb8500'], ['Gunmetal', '#4a4e57'], ['Rose Gold', '#e8a598'], ['Racing Green', '#1f5f3f'],
+];
+export const NEONS = [['Off', null], ['Teal', '#2de2ff'], ['Hot Pink', '#ff2d95'], ['Violet', '#b14dff'], ['Gold', '#ffd23f'], ['Lime', '#3dff8b']];
+export const RIMS = [['Chrome', null], ['Satin Black', '#3a3c40'], ['Gold', '#ffc84a'], ['Candy Red', '#ff4a4a'], ['Ice Blue', '#8fd3ff']];
+export const TINTS = ['Stock', 'Dark', 'Limo'];
+
+/** A car straight from the factory. */
+export function defaultMods() {
+  return { engine: 0, brakes: 0, armor: 0, neon: null, tint: 0, rims: null, color: null };
+}
 
 export const TRAFFIC_MIX = ['brisa', 'brisa', 'corso', 'corso', 'corso', 'marlin', 'pelican', 'halden', 'bayrunner', 'ardent'];
 
@@ -85,6 +104,40 @@ function crackTexture() {
   return t;
 }
 const crackedGlass = new THREE.MeshPhysicalMaterial({ map: crackTexture(), roughness: 0.35, metalness: 0.1, clearcoat: 0.6 });
+// window tints from the garage: stock, dark and limo-black
+const tintGlass = [
+  shared.glass,
+  new THREE.MeshPhysicalMaterial({ color: '#05080c', roughness: 0.03, metalness: 0.35, clearcoat: 1, envMapIntensity: 1.8 }),
+  new THREE.MeshPhysicalMaterial({ color: '#000000', roughness: 0.02, metalness: 0.7, clearcoat: 1, envMapIntensity: 2.2 }),
+];
+
+/** Underglow: a soft pool of coloured light painted under the car (it blooms after dark). */
+function glowPoolTexture() {
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 256;
+  const g = c.getContext('2d');
+  // an ellipse twice as long as it is wide, fading out before every edge of the canvas
+  g.setTransform(1, 0, 0, 2, 0, 0);
+  const grad = g.createRadialGradient(64, 64, 2, 64, 64, 62);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.4, 'rgba(255,255,255,0.6)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 128, 128);
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+const glowPool = glowPoolTexture();
+const glowGeo = new THREE.PlaneGeometry(1, 1);
+glowGeo.rotateX(-Math.PI / 2);
+const glowMats = new Map();
+function glowMaterial(color) {
+  if (!glowMats.has(color)) glowMats.set(color, new THREE.MeshBasicMaterial({ map: glowPool, color, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending }));
+  return glowMats.get(color);
+}
+const rimMats = new Map();
 
 function extrudeProfile(shape, width, bevel) {
   const g = new THREE.ExtrudeGeometry(shape, {
@@ -408,7 +461,70 @@ export class Vehicle {
     this.halfLen = this.spec.len / 2;
     this.lastImpact = 0;
     this.skid = 0;
+    // garage tuning multiplies the make's numbers; mods remembers what was bought
+    this.tune = { power: 1, top: 1, grip: 1, brake: 1 };
+    this.mods = defaultMods();
+    this.glow = null;
     this.sync();
+  }
+
+  /**
+   * Fit a set of garage mods: engine (power and top speed), brakes and tyres (grip and stopping),
+   * armour plating, underglow, window tint, rim colour and paint. Levels run 0..3.
+   */
+  applyMods(mods) {
+    const m = { ...defaultMods(), ...mods };
+    this.mods = m;
+    this.tune.power = 1 + m.engine * 0.13;
+    this.tune.top = 1 + m.engine * 0.06;
+    this.tune.grip = 1 + m.brakes * 0.09;
+    this.tune.brake = 1 + m.brakes * 0.18;
+    this.armor = Math.max(this.baseArmor || 0, m.armor * 0.16);
+    if (m.color) { this.color = m.color; this.parts.paint.color.set(m.color); }
+    this.setUnderglow(m.neon);
+    const p = this.parts;
+    if (p.glassMesh && this.spec.body !== 'boat' && p.glassMesh.material !== crackedGlass) p.glassMesh.material = tintGlass[m.tint] || shared.glass;
+    for (const w of p.wheels) {
+      w.spin.traverse((o) => {
+        if (!o.isMesh) return;
+        if (!m.rims) { o.material = wheelMat; return; }
+        if (!rimMats.has(m.rims)) {
+          const mat = wheelMat.clone();
+          mat.color.set(m.rims);
+          mat.metalness = 0.8;
+          mat.roughness = 0.25;
+          rimMats.set(m.rims, mat);
+        }
+        o.material = rimMats.get(m.rims);
+      });
+    }
+  }
+
+  /** Neon under the chassis (null switches it off). */
+  setUnderglow(color) {
+    if (this.glow) { this.mesh.remove(this.glow); this.glow = null; }
+    if (!color || this.spec.body === 'boat') return;
+    const g = new THREE.Mesh(glowGeo, glowMaterial(color));
+    g.scale.set(this.spec.wid * 2.1, 1, this.spec.len * 1.45);
+    g.position.y = 0.06;
+    g.renderOrder = 2;
+    this.mesh.add(g);
+    this.glow = g;
+  }
+
+  /** Back to full health: panels beaten out, glass and headlights replaced, fire out. */
+  repair() {
+    const p = this.parts;
+    this.health = 100;
+    this.burn = 0;
+    this.headBroken = false;
+    if (this.ownBody && p.paintMesh && this.spec.body !== 'boat') {
+      p.paintMesh.geometry.dispose();
+      p.paintMesh.geometry = modelParts(this.spec).paint;
+      this.ownBody = false;
+      this.dentTotal = 0;
+    }
+    if (p.glassMesh && this.spec.body !== 'boat') p.glassMesh.material = tintGlass[this.mods.tint] || shared.glass;
   }
 
   get speed() { return Math.hypot(this.vel.x, this.vel.z); }
@@ -435,13 +551,16 @@ export class Vehicle {
     let vF = this.vel.x * fx + this.vel.z * fz;
     let vR = this.vel.x * rx + this.vel.z * rz;
     const healthFactor = this.health < 25 ? 0.65 : 1;
+    const tune = this.tune;
+    const top = s.top * tune.top;
+    const brake = 26 * tune.brake;
 
     // engine, brakes and reverse
     if (inp.throttle > 0) {
-      if (vF < -0.5) vF += 26 * inp.throttle * dt;
-      else vF += s.power * healthFactor * inp.throttle * Math.max(0, 1 - vF / s.top) * dt;
+      if (vF < -0.5) vF += brake * inp.throttle * dt;
+      else vF += s.power * tune.power * healthFactor * inp.throttle * Math.max(0, 1 - vF / top) * dt;
     } else if (inp.throttle < 0) {
-      if (vF > 0.5) vF += 26 * inp.throttle * dt;
+      if (vF > 0.5) vF += brake * inp.throttle * dt;
       else if (vF > -14) vF += s.power * 0.55 * inp.throttle * dt;
     } else {
       vF -= Math.sign(vF) * Math.min(Math.abs(vF), 2.2 * dt);
@@ -450,7 +569,7 @@ export class Vehicle {
     if (inp.handbrake) vF -= Math.sign(vF) * Math.min(Math.abs(vF), 9 * dt);
 
     // grip: the handbrake lets the tail slide out
-    const grip = inp.handbrake ? 1.4 : s.grip;
+    const grip = inp.handbrake ? 1.4 : s.grip * tune.grip;
     const before = vR;
     vR *= Math.exp(-grip * dt);
     this.skid = Math.abs(before) > 4 || (inp.handbrake && Math.abs(vF) > 8) ? Math.min(1, Math.abs(before) / 10 + 0.3) : 0;
@@ -562,6 +681,7 @@ export class Vehicle {
   explode() {
     this.dead = true;
     this.health = 0;
+    this.setUnderglow(null);
     this.mesh.traverse((o) => {
       if (o.isMesh) o.material = shared.charred;
     });
@@ -609,7 +729,9 @@ export class Vehicle {
   remove() {
     this.scene.remove(this.mesh);
     this.mesh.traverse((o) => {
-      if (o.isMesh && o.material && !Object.values(shared).includes(o.material) && ![wheelMat, trimMat, driverMat, crackedGlass, headlightGlow].includes(o.material)) o.material.dispose();
+      const keep = Object.values(shared).includes(o.material) || [wheelMat, trimMat, driverMat, crackedGlass, headlightGlow, ...tintGlass].includes(o.material)
+        || [...glowMats.values(), ...rimMats.values()].includes(o.material);
+      if (o.isMesh && o.material && !keep) o.material.dispose();
       if (o.isMesh && this.ownBody && o === this.parts.paintMesh) o.geometry.dispose();
     });
   }

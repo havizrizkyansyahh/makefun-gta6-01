@@ -2,7 +2,8 @@
 // a sculpted head with eyes, nose, ears and hair, hands and shoes) shared by the player,
 // pedestrians, gang members and police. Each bone's parts are baked into one vertex-coloured
 // mesh so a crowd stays cheap to draw. animate() drives walk, run, aim, punch, sit, hands-up
-// and fall poses through the same joints.
+// and fall poses through the same joints. Looks carry the clothes, so Kai's outfits from
+// Threadline Outfitters (caps, sun hats, beanies, jackets, chains, shades) build the same way.
 import * as THREE from '../vendor/three.module.min.js';
 import { mergeParts, mat4 } from './geometry.js';
 
@@ -41,6 +42,12 @@ const G = {
   skirt: lathe([[0.17, 0.08], [0.2, -0.05], [0.27, -0.42], [0.001, -0.42]]),
   lens: new THREE.CapsuleGeometry(0.022, 0.028, 2, 8),
   bag: new THREE.BoxGeometry(0.22, 0.26, 0.08),
+  // outfit pieces from Threadline Outfitters
+  hatBrim: new THREE.CylinderGeometry(0.22, 0.23, 0.014, 26),
+  hatCrown: new THREE.CylinderGeometry(0.105, 0.12, 0.11, 20),
+  beanie: new THREE.SphereGeometry(0.134, 18, 10, 0, Math.PI * 2, 0, Math.PI * 0.56),
+  chain: new THREE.TorusGeometry(0.085, 0.009, 6, 22),
+  pendant: new THREE.SphereGeometry(0.018, 8, 6),
 };
 
 const weaponMat = {
@@ -60,6 +67,12 @@ function gunModel(kind) {
     part(new THREE.CylinderGeometry(0.012, 0.012, 0.14, 8), weaponMat.metal, 0, 0.03, 0.3, Math.PI / 2);
     part(new THREE.BoxGeometry(0.03, 0.14, 0.04), weaponMat.metal, 0, -0.06, 0.08, 0.15);
     part(new THREE.BoxGeometry(0.03, 0.06, 0.14), weaponMat.metal, 0, 0.0, -0.1);
+  } else if (kind === 'carbine') {
+    part(new THREE.BoxGeometry(0.045, 0.075, 0.42), weaponMat.metal, 0, 0.02, 0.12);            // receiver
+    part(new THREE.CylinderGeometry(0.014, 0.014, 0.3, 8), weaponMat.metal, 0, 0.035, 0.46, Math.PI / 2); // barrel
+    part(new THREE.BoxGeometry(0.035, 0.05, 0.12), weaponMat.metal, 0, 0.085, 0.08);             // optic
+    part(new THREE.BoxGeometry(0.03, 0.15, 0.05), weaponMat.metal, 0, -0.07, 0.14, 0.3);         // magazine
+    part(new THREE.BoxGeometry(0.035, 0.07, 0.2), weaponMat.wood, 0, -0.005, -0.18);             // stock
   } else {
     part(new THREE.CylinderGeometry(0.02, 0.02, 0.6, 10), weaponMat.metal, 0, 0.03, 0.22, Math.PI / 2);
     part(new THREE.CylinderGeometry(0.024, 0.024, 0.3, 10), weaponMat.wood, 0, -0.005, 0.2, Math.PI / 2);
@@ -104,6 +117,10 @@ export class Human {
     ];
     if (L.badge) chestParts.push({ geo: G.badge, color: '#ffd54a', matrix: M(0.1, 0.46, 0.125, 1, 1, 1, -0.1) });
     if (L.jacket) chestParts.push({ geo: G.torso, color: L.jacket, matrix: M(0, 0.02, -0.004, 1.06, 0.98, 0.66) });
+    if (L.chain) {
+      chestParts.push({ geo: G.chain, color: '#e8c25a', matrix: M(0, 0.585, 0.035, 1, 1.25, 1, Math.PI / 2 - 0.35) });
+      chestParts.push({ geo: G.pendant, color: '#f2d27a', matrix: M(0, 0.5, 0.118) });
+    }
     mesh(chestParts, chest);
     const neck = new THREE.Group();
     neck.position.y = 0.64;
@@ -130,6 +147,14 @@ export class Human {
     if (L.cap) {
       face.push({ geo: G.capTop, color: L.cap, matrix: M(0, 0.25, -0.005, 0.96, 0.8, 1) });
       face.push({ geo: G.brim, color: L.cap, matrix: M(0, 0.262, 0.09, 1, 1, 1.25, 0, -Math.PI / 2) });
+    } else if (L.sunhat) {
+      // a wide-brimmed straw hat over short hair
+      face.push({ geo: G.hairCap, color: L.hair, matrix: M(0, 0.19, -0.008, 0.92, 0.9, 0.98, -0.25) });
+      face.push({ geo: G.hatBrim, color: L.sunhat, matrix: M(0, 0.275, 0, 1, 1, 1, -0.05) });
+      face.push({ geo: G.hatCrown, color: L.sunhat, matrix: M(0, 0.335, -0.004) });
+      face.push({ geo: G.hatCrown, color: L.hatBand || '#2a2420', matrix: M(0, 0.3, -0.004, 1.03, 0.22, 1.03) });
+    } else if (L.beanie) {
+      face.push({ geo: G.beanie, color: L.beanie, matrix: M(0, 0.205, -0.01, 0.96, 1.05, 1.0, -0.12) });
     } else if (!L.bald) {
       face.push({ geo: G.hairCap, color: L.hair, matrix: M(0, 0.2, -0.008, 0.94, 1.0, 1.0, -0.25) });
       if (L.bun) face.push({ geo: G.bun, color: L.hair, matrix: M(0, 0.3, -0.1) });
@@ -345,4 +370,12 @@ export const LOOKS = {
   nadia: { skin: '#a26a45', shirt: '#f2923a', pants: '#3d405b', hair: '#1b1712', shoes: '#b33a2b', bun: true, belt: false },
   pearl: { skin: '#5c3420', shirt: '#9b5de5', pants: '#f4f0e6', hair: '#d8d2c8', shoes: '#6a4c93', bun: true, sleeves: 'long', belt: false },
   calder: { skin: '#f1c9a5', shirt: '#f8f9fa', pants: '#f8f9fa', hair: '#c9a25e', shoes: '#ced4da', jacket: '#e9ecef', sleeves: 'long' },
+  // the harbour board's people and the shopkeepers
+  hollis: { skin: '#e0ac85', shirt: '#dfe6f0', pants: '#1c2541', hair: '#d8d2c8', shoes: '#111111', jacket: '#1c2541', badge: true, sleeves: 'long', glasses: true, belt: '#111111' },
+  vey: { skin: '#c68b62', shirt: '#3a4a6a', pants: '#2b2d42', hair: '#2b2b2b', shoes: '#111111', jacket: '#5a3e2b', sleeves: 'long', bald: true },
+  dock: { skin: '#a26a45', shirt: '#f2923a', pants: '#3d405b', hair: '#1b1712', shoes: '#5a3e2b', beanie: '#1d3557', sleeves: 'long', belt: '#2a2420' },
+  ines: { skin: '#7a4a2e', shirt: '#3a7bd5', pants: '#3a7bd5', hair: '#1b1712', shoes: '#111111', bun: true, sleeves: 'long', belt: '#2a2420' },
+  tailor: { skin: '#f1c9a5', shirt: '#f4f0e6', pants: '#2b2d42', hair: '#8a4a2a', shoes: '#8b5a2b', jacket: '#6a4c93', glasses: true, long: true, bun: false, sleeves: 'long', belt: false },
+  gunsmith: { skin: '#d9a47a', shirt: '#4a6a3a', pants: '#5a3e2b', hair: '#6e4424', shoes: '#3a2a1a', cap: '#3d405b', belt: '#2a2420' },
+  clerk: { skin: '#e0ac85', shirt: '#ff5fa2', pants: '#e8e4da', hair: '#c9a25e', shoes: '#f4f4f4', bun: true, belt: false },
 };

@@ -2,7 +2,8 @@
 // solid shapes. Leaves, palm fronds and bark are painted on canvases (with bark normal maps);
 // a tree's crown is dozens of leaf cards whose normals point out of the crown so it shades like
 // a soft volume; palms have curved, ringed trunks and drooping pinnate fronds. Every species
-// comes in a few variants, drawn instanced, and casts leaf-shaped shadows.
+// comes in a few variants, drawn instanced, and casts leaf-shaped shadows. The same leaves make
+// the potted plants in the interiors.
 import * as THREE from '../vendor/three.module.min.js';
 import { mergeParts, mat4 } from './geometry.js';
 import { makeRng } from './rng.js';
@@ -291,6 +292,49 @@ function foliageMaterial(map, tint) {
   const m = new THREE.MeshStandardMaterial({ map, color: tint, alphaTest: 0.42, side: THREE.DoubleSide, roughness: 0.75, metalness: 0, envMapIntensity: 0.35 });
   const depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map, alphaTest: 0.42 });
   return { m, depth };
+}
+
+let pottedCache = null;
+
+/**
+ * A potted plant for the interiors: a turned terracotta pot of soil and a small crown of the
+ * same alpha-cut leaf cards the street trees use. Returns a Group standing on y = 0.
+ */
+export function pottedPlant(scale = 1) {
+  if (!pottedCache) {
+    const rng = makeRng(808);
+    const pot = new THREE.LatheGeometry([[0.001, 0], [0.2, 0], [0.24, 0.05], [0.3, 0.55], [0.33, 0.6], [0.3, 0.62], [0.001, 0.6]].map(([r, y]) => new THREE.Vector2(r, y)), 18);
+    const stemGeo = mergeParts([0, 1, 2].map((k) => ({ geo: trunkGeometry(stem(new THREE.Vector3(0, 0.55, 0), new THREE.Vector3(Math.cos(k * 2.1) * 0.25, 1.25 + k * 0.12, Math.sin(k * 2.1) * 0.25), new THREE.Vector3(0.05, 0, 0.05), 5), 0.025, 0.012, 5), matrix: new THREE.Matrix4() })), false);
+    const plane = new THREE.PlaneGeometry(1, 1);
+    const centre = new THREE.Vector3(0, 1.3, 0);
+    const cards = [];
+    const zAxis = new THREE.Vector3(0, 0, 1);
+    for (let k = 0; k < 16; k += 1) {
+      const dir = new THREE.Vector3(rng.range(-1, 1), rng.range(-0.3, 1), rng.range(-1, 1)).normalize();
+      const p = centre.clone().addScaledVector(dir, rng.range(0.1, 0.35));
+      const q = new THREE.Quaternion().setFromUnitVectors(zAxis, dir);
+      q.multiply(new THREE.Quaternion().setFromAxisAngle(zAxis, rng.next() * Math.PI * 2));
+      const s = rng.range(0.45, 0.7);
+      cards.push({ geo: plane, matrix: new THREE.Matrix4().compose(p, q, new THREE.Vector3(s, s, s)) });
+    }
+    const crown = mergeParts(cards, false);
+    const leaf = foliageMaterial(leafTexture(57), '#c8f0a0');
+    pottedCache = {
+      pot, stem: stemGeo, crown,
+      potMat: new THREE.MeshStandardMaterial({ color: '#b5603a', roughness: 0.85 }),
+      stemMat: new THREE.MeshStandardMaterial({ color: '#4a5a2a', roughness: 0.9 }),
+      leaf,
+    };
+  }
+  const c = pottedCache;
+  const g = new THREE.Group();
+  const pot = new THREE.Mesh(c.pot, c.potMat);
+  const st = new THREE.Mesh(c.stem, c.stemMat);
+  const crown = new THREE.Mesh(c.crown, c.leaf.m);
+  crown.customDepthMaterial = c.leaf.depth;
+  for (const m of [pot, st, crown]) { m.castShadow = true; m.receiveShadow = true; g.add(m); }
+  g.scale.setScalar(scale);
+  return g;
 }
 
 /**

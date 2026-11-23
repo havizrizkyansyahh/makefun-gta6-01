@@ -1,5 +1,6 @@
 // Keyboard and mouse: held keys, keys pressed this frame, mouse movement under pointer lock,
-// buttons and the wheel. Systems read it; main.js clears the per-frame parts after each frame.
+// buttons and the wheel. Systems read it, and may consume a press they handled so nothing else
+// acts on it; main.js clears the per-frame parts after each frame.
 
 export class Input {
   constructor(canvas) {
@@ -64,6 +65,15 @@ export class Input {
     if (this.down(pos) || (posAlt && this.down(posAlt))) v += 1;
     return v;
   }
+
+  /**
+   * Swallow a key press so that a later system in the same frame does not act on it too (one E
+   * press opens a door, not the door and the shop behind it).
+   */
+  consume(code) { this.pressed.delete(code); }
+
+  /** Was any of these keys pressed this frame? */
+  hitAny(...codes) { return codes.some((c) => this.hit(c)); }
 
   endFrame() {
     this.pressed.clear();

@@ -1,9 +1,17 @@
 // The game world: owns the scene and every system (city, sky, effects, player, traffic, police,
-// missions, pickups) and runs one simulation step: driving and collisions, people, crimes and the
-// police response, damage, wrecks that burn and explode, pickups, money, the clock, sound and the
-// camera. It also handles being wasted or busted, respawning, and the save file.
+// missions, interiors, the garage, outfits, side activities, wildlife, pickups) and runs one
+// simulation step: driving and collisions, people, crimes and the police response, damage,
+// wrecks that burn and explode, pickups, money, the clock, sound and the camera. While a shop or
+// workshop screen is open (world.ui) Kai's own controls rest and the screen takes the keys. It
+// also handles being wasted or busted, respawning, and the save file.
 import * as THREE from '../vendor/three.module.min.js';
 import { City, PIER } from './city.js';
+import { Interiors } from './interiors.js';
+import { Outfits } from './outfits.js';
+import { Garage } from './garage.js';
+import { Activities } from './activities.js';
+import { Wildlife } from './wildlife.js';
+import { WEAPON_ORDER } from './combat.js';
 import { Signals } from './signals.js';
 import { Weather } from './weather.js';
 import { SkidMarks } from './skids.js';
@@ -17,8 +25,14 @@ import { CameraRig } from './camera.js';
 import { collideVehicles, Vehicle, headlightGlow } from './vehicles.js';
 import { Pickup, Marker } from './markers.js';
 import { STATIONS } from './audio.js';
-import { CITY, DAY_SECONDS, START_HOUR, SAVE_KEY, PLAYER } from './config.js';
+import { CITY, DAY_SECONDS, START_HOUR, SAVE_KEY, SAVE_VERSION, PLAYER } from './config.js';
 import { makeRng } from './rng.js';
+
+/** What Kai's own controls see while a shop screen has the keyboard: nothing pressed. */
+const IDLE = {
+  mouseDX: 0, mouseDY: 0, wheel: 0, enabled: true,
+  down: () => false, hit: () => false, mouse: () => false, mouseHit: () => false, axis: () => 0, consume() {}, hitAny: () => false,
+};
 
 export class World {
   constructor(renderer, audio, hud, seed = 7) {
@@ -52,6 +66,13 @@ export class World {
     this.traffic = new Traffic(this);
     this.police = new Police(this);
     this.missions = new Missions(this);
+    this.interior = null;
+    this.ui = null;
+    this.interiors = new Interiors(this);
+    this.outfits = new Outfits(this);
+    this.garage = new Garage(this);
+    this.activities = new Activities(this);
+    this.wildlife = new Wildlife(this);
     this.money = 250;
     this.hour = START_HOUR;
     this.time = 0;
@@ -99,6 +120,24 @@ export class World {
   }
 
   where() { return this.player.where(); }
+
+  /** Where Kai shows on the maps: the door of the building he is in, or where he is. */
+  mapPos() {
+    const at = this.player.where();
+    return this.interior ? { x: this.interior.door.x, z: this.interior.door.z } : at;
+  }
+
+  /** Give a shop or workshop screen the keyboard (closing any other first). */
+  openUi(panel) {
+    if (this.ui) this.closeUi();
+    this.ui = panel;
+  }
+
+  closeUi() {
+    const ui = this.ui;
+    if (ui && ui.close) ui.close();
+    this.ui = null;
+  }
 
   /** Rough "could the player see this point" test: in front of the camera, within range. */
   isVisible(x, y, z, range) {
@@ -159,6 +198,7 @@ export class World {
   wasted() {
     const p = this.player;
     if (p.dead) return;
+    if (this.ui) this.closeUi();
     p.health = 0;
     p.dead = true;
     if (p.vehicle) p.exitVehicle();
@@ -172,6 +212,7 @@ export class World {
   busted() {
     const p = this.player;
     if (p.dead) return;
+    if (this.ui) this.closeUi();
     p.dead = true;
     if (p.vehicle) p.exitVehicle();
     p.human.animate(0, 0, 'hands');
@@ -189,8 +230,10 @@ export class World {
     const fee = Math.min(this.money, kind === 'busted' ? 300 + Math.round(this.money * 0.05) : 200 + Math.round(this.money * 0.05));
     this.money -= fee;
     if (kind === 'busted') {
-      for (const k of ['pistol', 'smg', 'shotgun']) p.weapons[k].ammo = Math.floor(p.weapons[k].ammo / 2);
+      for (const k of WEAPON_ORDER) if (k !== 'fist') p.weapons[k].ammo = Math.floor(p.weapons[k].ammo / 2);
     }
+    // going down indoors still wakes Kai up at the hospital or the precinct, outside
+    if (this.interior) this.interiors.exit(true);
     p.dead = false;
     p.health = PLAYER.maxHealth;
     p.human.fall = 0;
@@ -225,10 +268,10 @@ export class World {
     // the weapon wheel: hold Tab, time slows, the mouse points at a weapon instead of the camera
     const wheel = this.hud.weapons;
     const p0 = this.player;
-    if (input.down('Tab') && !p0.dead && !wheel.open) wheel.openWheel(p0);
+    if (input.down('Tab') && !p0.dead && !wheel.open && !this.ui) wheel.openWheel(p0);
     if (wheel.open) {
       wheel.point(input.mouseDX, input.mouseDY, p0);
-      ['fist', 'pistol', 'smg', 'shotgun'].forEach((k, i) => { if (input.hit(`Digit${i + 1}`) && p0.weapons[k].owned) wheel.choice = k; });
+      WEAPON_ORDER.forEach((k, i) => { if (input.hit(`Digit${i + 1}`) && p0.weapons[k].owned) wheel.choice = k; });
       input.mouseDX = 0;
       input.mouseDY = 0;
       if (!input.down('Tab')) {
@@ -246,8 +289,13 @@ export class World {
       this.downTimer -= dt;
       if (this.downTimer <= 0) this.respawn();
     }
-    p.update(dt, input, this.rig);
-    this.signals.update(dt);
+    // doors, counters, the workshop bay and the activity starts read E (and the counter's number
+    // keys) before Kai's own controls do, and swallow what they use
+    this.interiors.update(dt, input);
+    this.garage.update(dt, input);
+    p.update(dt, this.ui ? IDLE : input, this.rig);
+    if (this.ui) this.ui.update(dt, input);
+    this.signals.update(dt, this.hour);
 
     // vehicles: AI, physics, collisions
     this.events.length = 0;
@@ -268,9 +316,12 @@ export class World {
     this.cullFar();
     this.police.update(dt);
     this.traffic.update(dt);
-    this.missions.update(dt, input);
+    this.missions.update(dt, this.ui ? IDLE : input);
+    this.activities.update(dt, this.ui ? IDLE : input);
+    this.wildlife.update(dt);
     this.collectPickups(dt);
     this.fx.update(dt);
+    if (this.post) this.post.grade(dt, p.dead ? 0.85 : 0, this.interior ? 1 : 0);
 
     const at = this.where();
     this.sky.update(this.hour, at);
@@ -282,8 +333,8 @@ export class World {
       wp.marker.update(dt);
       wp.t -= dt;
       if (wp.t <= 0) { wp.t = 0.5; this.updateRoute(); }
-      const here = this.where();
-      if (Math.hypot(here.x - wp.x, here.z - wp.z) < 12) { this.clearWaypoint(); this.hud.notify('You have arrived.'); this.audio.ui('pickup'); }
+      const here = this.mapPos();
+      if (!this.interior && Math.hypot(here.x - wp.x, here.z - wp.z) < 12) { this.clearWaypoint(); this.hud.notify('You have arrived.'); this.audio.ui('pickup'); }
     }
     this.lightsOn();
     this.city.syncSky(this.sky.uniforms);
@@ -291,7 +342,7 @@ export class World {
     this.rig.update(dt, this, input);
     this.sounds();
 
-    const d = this.city.districtAt(at.x, at.z);
+    const d = this.interior ? this.lastDistrict : this.city.districtAt(at.x, at.z);
     if (d !== this.lastDistrict) {
       if (this.lastDistrict !== null) this.hud.district(d);
       this.lastDistrict = d;
@@ -447,7 +498,7 @@ export class World {
   updateRoute() {
     const wp = this.waypoint;
     if (!wp) return;
-    const at = this.where();
+    const at = this.mapPos();
     const nodes = this.city.route(this.city.nearestNode(at.x, at.z), this.city.nearestNode(wp.x, wp.z));
     wp.route = [{ x: at.x, z: at.z }, ...nodes.map((n) => ({ x: this.city.nodes[n].x, z: this.city.nodes[n].z })), { x: wp.x, z: wp.z }];
   }
@@ -524,7 +575,8 @@ export class World {
       if (k.kind === 'cash') {
         if (k.data.amount) { this.money += k.data.amount; this.hud.notify(`+$${k.data.amount}`); }
       } else if (k.kind === 'ammo') {
-        const key = ['smg', 'shotgun', 'pistol'].find((w) => p.weapons[w].owned) || 'pistol';
+        // ammo goes to the gun in hand if it takes any, else to the best gun Kai carries
+        const key = p.current !== 'fist' ? p.current : ['carbine', 'smg', 'shotgun', 'pistol'].find((w) => p.weapons[w].owned) || 'pistol';
         p.give(key, k.data.amount || 12);
         this.hud.notify(`Ammo +${k.data.amount || 12}`);
       } else if (k.kind === 'health') p.health = Math.min(100, p.health + 40);
@@ -571,7 +623,7 @@ export class World {
     const p = this.player;
     const at = p.vehicle ? { x: p.vehicle.pos.x, z: p.vehicle.pos.z } : p.pos;
     return {
-      v: 1,
+      v: SAVE_VERSION,
       savedAt: Date.now(),
       money: this.money,
       hour: this.hour,
@@ -579,6 +631,10 @@ export class World {
       player: { x: at.x, z: at.z, heading: p.heading, health: p.health, armor: p.armor, weapons: p.weapons, current: p.current },
       missions: this.missions.serialize(),
       stats: this.stats,
+      outfits: this.outfits.serialize(),
+      garage: this.garage.serialize(),
+      activities: this.activities.serialize(),
+      race: { best: this.missions.race.best ?? null },
     };
   }
 
@@ -621,12 +677,16 @@ export class World {
     p.health = data.player.health || 100;
     p.armor = data.player.armor || 0;
     this.missions.restore(data.missions || {});
-    // wake up at the safehouse door
-    const s = this.city.places.safehouse;
-    p.place(s.x, s.z + 1.5, s.face);
-    this.rig.snap(s.face, 0.2);
+    this.outfits.restore(data.outfits);
+    this.garage.restore(data.garage);
+    this.activities.restore(data.activities);
+    if (data.race && data.race.best) this.missions.race.best = data.race.best;
     p.select(p.weapons[data.player.current]?.owned ? data.player.current : 'fist');
     this.populate();
+    // Kai's own car waits at the kerb outside, and he wakes up in his apartment by the bed
+    const s = this.city.places.safehouse;
+    this.garage.spawnPersonal(s.x + 7, s.z + 0.4, Math.PI / 2);
+    this.interiors.enter('apartment', { silent: true, at: { x: -5.6, z: -2.4, face: Math.PI / 2 } });
   }
 
   render() {

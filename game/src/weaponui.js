@@ -1,7 +1,7 @@
 // Weapon UI: silhouettes of each gun painted on canvases, the weapon panel (icon, name, rounds in
 // the magazine as big digits and a bar, reserve ammo), a slot strip that flashes up when you
 // switch, and the weapon wheel: hold Tab, time slows, point at a weapon with the mouse (or press
-// 1-4), let go to draw it.
+// 1-5), let go to draw it. The wheel lays out however many weapons the arsenal has, evenly.
 import { WEAPONS, WEAPON_ORDER } from './combat.js';
 
 const ICON_W = 200;
@@ -35,6 +35,14 @@ export function weaponIcon(key) {
     poly([[72, 48], [88, 48], [96, 84], [80, 86]]);  // magazine
     poly([[50, 48], [64, 48], [60, 72], [46, 72]]);  // grip
     poly([[46, 30], [16, 34], [12, 52], [20, 52], [24, 42], [46, 42]]); // folding stock
+  } else if (key === 'carbine') {
+    round(52, 30, 92, 16, 3);                        // receiver
+    round(142, 34, 50, 7, 2);                        // barrel
+    round(150, 26, 20, 6, 2);                        // front sight block
+    round(70, 20, 50, 8, 3);                         // optic
+    poly([[96, 44], [110, 44], [116, 76], [102, 78]]); // curved magazine
+    poly([[66, 44], [80, 44], [74, 70], [60, 70]]);  // pistol grip
+    poly([[54, 32], [14, 34], [8, 58], [20, 58], [26, 46], [54, 44]]); // stock
   } else {
     round(30, 30, 160, 10, 3);                       // barrel
     round(84, 40, 60, 11, 4);                        // pump
@@ -51,8 +59,8 @@ const el = (tag, cls, parent, html = '') => {
   return e;
 };
 
-// wheel layout: top, right, bottom, left
-const WHEEL_ANGLES = { fist: -Math.PI / 2, pistol: 0, smg: Math.PI / 2, shotgun: Math.PI };
+// wheel layout: fists at the top, then clockwise round the ring in arsenal order
+const WHEEL_ANGLES = Object.fromEntries(WEAPON_ORDER.map((k, i) => [k, -Math.PI / 2 + (i / WEAPON_ORDER.length) * Math.PI * 2]));
 
 export class WeaponHud {
   constructor(panelParent, root) {

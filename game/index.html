@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Solmara Bay</title>
+<meta name="description" content="Solmara Bay: an original open-world crime game in the browser. A bay city to explore on foot, by car and by boat, ten story missions, shops and a garage to walk into.">
+<meta name="theme-color" content="#0d1020">
 <link rel="icon" href="data:,">
 <style>
   :root {
@@ -164,6 +166,36 @@
   .legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 10px 0 12px; font-size: 14px; }
   .legend span::before { content: ""; display: inline-block; width: 11px; height: 11px; border-radius: 50%; background: var(--c); margin-right: 6px; vertical-align: -1px; }
   .menu-toast { position: fixed; left: 50%; bottom: 60px; transform: translateX(-50%); padding: 10px 20px; border-radius: 20px; background: #1d2a38; font-weight: 700; }
+
+  /* ------------------------------------------------ shop and workshop screens */
+  .hud-panel { display: none; position: absolute; right: 28px; top: 228px; width: 420px; padding: 16px 18px 14px; background: linear-gradient(160deg, rgba(10,14,30,.94), rgba(22,18,40,.9)); border-top: 4px solid var(--sun); border-radius: 10px; text-shadow: none; box-shadow: 0 14px 40px rgba(0,0,0,.45); }
+  .p-title { font: 900 22px var(--display); letter-spacing: 3px; }
+  .p-sub { font-size: 12px; opacity: .75; margin-top: 3px; }
+  .p-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 10px 0 6px; }
+  .p-tabs span { padding: 3px 8px; border-radius: 10px; font: 700 12px var(--font); background: rgba(255,255,255,.07); opacity: .6; }
+  .p-tabs span.on { background: rgba(255,255,255,.2); opacity: 1; box-shadow: inset 0 -2px 0 currentColor; }
+  .p-rows { display: grid; gap: 2px; margin-top: 8px; max-height: calc(100vh - 380px); overflow: hidden; }
+  .p-row { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 6px; font-size: 15px; border-left: 3px solid transparent; }
+  .p-row span { flex: 1; }
+  .p-row b { font-weight: 600; font-size: 13px; color: #d9e2ff; white-space: nowrap; }
+  .p-row em { font-style: normal; min-width: 70px; text-align: right; font: 800 13px var(--display); letter-spacing: 1px; color: #8dff9e; }
+  .p-row i { width: 14px; height: 14px; border-radius: 50%; flex: none; box-shadow: 0 0 0 2px rgba(255,255,255,.35); }
+  .p-row.sel { background: rgba(255,255,255,.12); border-left-color: var(--sun); }
+  .p-row.dim em { color: #ff8a80; }
+  .p-row.good em { color: #ffd27a; }
+  .p-foot { margin-top: 10px; font-size: 11px; opacity: .65; line-height: 1.4; }
+  .hud-fade { position: absolute; inset: 0; background: #05060c; opacity: 0; pointer-events: none; }
+  table.kv.acts td { vertical-align: top; padding: 7px 22px 7px 0; }
+  table.kv.acts small { display: block; font-size: 12px; opacity: .65; color: #fff; margin-top: 2px; }
+  .medal { display: inline-block; margin-left: 6px; padding: 0 7px; border-radius: 8px; font: 800 11px var(--display); letter-spacing: 1px; color: #1d1f2b; }
+  .medal.gold { background: #ffd23f; } .medal.silver { background: #d8e2ec; } .medal.bronze { background: #e09a5a; }
+  .maplegend { grid-template-columns: 1fr 1fr; font-size: 12px; }
+
+  /* ------------------------------------------------ photo mode */
+  .photo-ui { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); padding: 10px 22px; border-radius: 22px; background: rgba(10,14,30,.6); text-align: center; pointer-events: none; text-shadow: 0 1px 2px rgba(0,0,0,.6); }
+  .photo-ui b { font: 900 16px var(--display); letter-spacing: 4px; color: var(--sun); margin-right: 10px; }
+  .photo-ui span { font: 700 15px var(--font); }
+  .photo-ui small { display: block; margin-top: 4px; font-size: 12px; opacity: .75; }
 </style>
 </head>
 <body>

@@ -1,8 +1,9 @@
 // The third-person camera: an over-the-shoulder orbit on foot that tightens when aiming, a chase
 // camera in cars that swings back behind the bonnet when the mouse lets go and widens with speed,
-// collision with buildings so walls never hide Kai, recoil kick and shake.
+// collision with buildings so walls never hide Kai, a closer framing under ceilings indoors, an
+// orbit view for the garage and the boutique mirror, recoil kick and shake.
 import * as THREE from '../vendor/three.module.min.js';
-import { CAMERA } from './config.js';
+import { CAMERA, INTERIOR } from './config.js';
 import { clamp, damp, wrapAngle } from './rng.js';
 
 export class CameraRig {
@@ -36,9 +37,37 @@ export class CameraRig {
     this.pitch = pitch;
   }
 
+  /**
+   * Orbit a point: the garage's turntable view and the boutique's mirror. The mouse swings the
+   * view round; when it rests the camera drifts slowly by itself.
+   */
+  orbit(dt, input, x, y, z, dist, height, drift = 0.25, shift = 0) {
+    this.orbitYaw = (this.orbitYaw ?? this.yaw) - input.mouseDX * this.sensitivity + dt * drift;
+    this.orbitPitch = clamp((this.orbitPitch ?? 0.25) + input.mouseDY * this.sensitivity * 0.6, 0.02, 0.9);
+    const cp = Math.cos(this.orbitPitch);
+    const cam = this.camera;
+    cam.position.set(x - Math.sin(this.orbitYaw) * dist * cp, y + height + Math.sin(this.orbitPitch) * dist, z - Math.cos(this.orbitYaw) * dist * cp);
+    // look a little to the right of the subject so it sits left of the shop screen
+    const rx = -Math.cos(this.orbitYaw) * shift;
+    const rz = Math.sin(this.orbitYaw) * shift;
+    cam.lookAt(x + rx, y + height * 0.45, z + rz);
+    this.dir.set(x - cam.position.x, y - cam.position.y, z - cam.position.z).normalize();
+    if (Math.abs(cam.fov - 52) > 0.05) { cam.fov = this.fov = 52; cam.updateProjectionMatrix(); }
+  }
+
+  /** Leave an orbit view and go back to following Kai from where the orbit left off. */
+  endOrbit() {
+    if (this.orbitYaw !== undefined) this.yaw = this.orbitYaw;
+    this.orbitYaw = undefined;
+    this.orbitPitch = undefined;
+    this.override = null;
+  }
+
   update(dt, world, input) {
+    if (this.override) { this.override(dt, input, this); return; }
     const p = world.player;
     const v = p.vehicle;
+    const indoor = !!world.interior;
     const mdx = input.mouseDX;
     const mdy = input.mouseDY * (this.invertY ? -1 : 1);
     this.yaw -= mdx * this.sensitivity;
@@ -78,10 +107,13 @@ export class CameraRig {
       this.pivot.set(v.pos.x, height, v.pos.z);
     } else {
       const aim = p.aiming;
-      wantDist = aim ? CAMERA.aimDistance : CAMERA.footDistance;
-      wantFov = aim ? CAMERA.fov - 14 : CAMERA.fov;
+      // under a ceiling the camera tucks in closer and a little lower, and widens to see the room
+      wantDist = indoor ? (aim ? INTERIOR.aimDistance : INTERIOR.footDistance) : aim ? CAMERA.aimDistance : CAMERA.footDistance;
+      const fov = indoor ? INTERIOR.fov : CAMERA.fov;
+      wantFov = aim ? fov - 14 : fov;
       side = aim ? 0.75 : 0.55;
-      height = p.y + CAMERA.footHeight;
+      height = p.y + (indoor ? INTERIOR.footHeight : CAMERA.footHeight);
+      if (indoor) this.pitch = Math.min(this.pitch, 0.75);
       const rx = -Math.cos(this.yaw);
       const rz = Math.sin(this.yaw);
       this.pivot.set(p.pos.x + rx * side, height, p.pos.z + rz * side);

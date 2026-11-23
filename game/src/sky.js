@@ -1,5 +1,6 @@
 // Time of day over Solmara Bay: a gradient sky dome with a sun disc, the sun and sky lights, fog
-// that matches the horizon, and a shadow camera that follows the player. Hour 0..24.
+// that matches the horizon, and a shadow camera that follows the player. Hour 0..24. Indoors the
+// sun is shut out and the sky light becomes a warm, even room fill.
 import * as THREE from '../vendor/three.module.min.js';
 import { clamp, lerp } from './rng.js';
 
@@ -162,6 +163,17 @@ export class Sky {
     this.hemi.intensity = k.amb * 0.55;
     this.uniforms.uNight.value = this.night;
     this.uniforms.uTime.value = performance.now() / 1000;
+    if (this.indoor) {
+      // under a roof: no sun, an even warm fill from the room's lamps, no fog
+      this.sun.intensity = 0;
+      this.hemi.intensity = 0.95;
+      this.hemi.color.set('#fff4e6');
+      this.hemi.groundColor.set('#6a5444');
+      this.scene.fog.near = 400;
+      this.scene.fog.far = 2000;
+    } else {
+      this.hemi.groundColor.set('#d9c7a0');
+    }
   }
 
   /** Re-capture the sky into scene.environment when the hour has moved on. */

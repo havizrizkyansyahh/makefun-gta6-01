@@ -1,7 +1,9 @@
 // The Solmara Bay PD: crimes raise a wanted level of up to five stars; patrol cruisers are
 // dispatched to chase, ram and box the player in, officers get out to arrest (one star) or
 // shoot (two and up); a search area follows the last place the police saw the player, and
-// staying out of sight beyond it long enough loses them. Being caught on foot is a bust.
+// staying out of sight beyond it long enough loses them. Being caught on foot is a bust. Doors
+// stay shut to a wanted man, and nobody looks for him once he is inside. After the story's end,
+// with Captain Hollis gone, the department gives up a chase a little sooner.
 import { WANTED } from './config.js';
 import { Npc } from './npc.js';
 import { Helicopter } from './helicopter.js';
@@ -148,6 +150,8 @@ export class Police {
     const p = w.player;
     const where = p.where();
     if (this.flash > 0) this.flash -= dt;
+    // behind closed doors the street carries on without Kai: no sightings, no new units
+    if (w.interior) return;
     const stars = this.stars;
 
     // can any officer see the player?
@@ -172,7 +176,9 @@ export class Police {
       } else if (!this.locked) {
         const out = Math.hypot(where.x - this.lastSeen.x, where.z - this.lastSeen.z) > WANTED.searchRadius[stars];
         this.hidden += dt * (out ? 1 : 0.25);
-        if (this.hidden > WANTED.escapeTime[stars]) {
+        // once Hollis is gone the department stops chasing so hard
+        const reformed = w.missions.completed.has('low-tide') ? 0.75 : 1;
+        if (this.hidden > WANTED.escapeTime[stars] * reformed) {
           this.clear();
           w.hud.notify('You lost the cops.');
         }

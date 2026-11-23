@@ -1,9 +1,11 @@
 // The Bayside Run: a one-lap street race through Little Marisco and Midtown against three
 // rivals. Drive into the chequered marker on the avenue and press E; the field lines up, a
 // countdown runs, rivals follow the course on the road graph, and the finishing order pays.
+// Kai's best winning time is kept with the save.
 import { Marker } from './markers.js';
 import { LaneDriver } from './traffic.js';
 import { CITY } from './config.js';
+import { formatTime } from './rng.js';
 
 const CORNERS = [[8, 6], [8, 2], [3, 2], [3, 7], [8, 7], [8, 6]];
 const PRIZES = [2000, 900, 400, 0];
@@ -99,6 +101,7 @@ export class StreetRace {
     this.active = null;
     w.missions.timer = null;
     if (place === null) {
+      void s;
       w.hud.bigText('RACE OVER', reason, 3, '#ff5252');
       w.audio.ui('fail');
       return;
@@ -106,8 +109,11 @@ export class StreetRace {
     const prize = PRIZES[place - 1];
     w.money += prize;
     w.stats.races = (w.stats.races || 0) + (place === 1 ? 1 : 0);
+    const record = place === 1 && (!this.best || s.time < this.best);
+    if (record) this.best = s.time;
     const names = ['1ST', '2ND', '3RD', '4TH'];
-    w.hud.bigText(`${names[place - 1]} PLACE`, prize ? `Bayside Run  +$${prize.toLocaleString()}` : 'Bayside Run: no prize this time', 4, place === 1 ? '#ffd23f' : '#ffffff');
+    const time = `  ·  ${formatTime(s.time)}${record ? ' (best)' : ''}`;
+    w.hud.bigText(`${names[place - 1]} PLACE`, prize ? `Bayside Run  +$${prize.toLocaleString()}${time}` : `Bayside Run: no prize this time${time}`, 4, place === 1 ? '#ffd23f' : '#ffffff');
     w.audio.ui(place === 1 ? 'pass' : 'cash');
   }
 
@@ -116,10 +122,10 @@ export class StreetRace {
     const p = w.player;
     this.marker.update(dt);
     if (!this.active) {
-      const busy = w.missions.active || w.missions.side;
+      const busy = w.missions.busy();
       if (!busy && p.vehicle && p.vehicle.spec.body !== 'boat' && this.marker.inside(p.vehicle.pos.x, p.vehicle.pos.z, 1)) {
-        w.hud.help(w.police.stars > 0 ? 'Lose the cops before racing.' : 'Press E to start the Bayside Run (street race).');
-        if (input.hit('KeyE') && w.police.stars === 0) this.begin();
+        w.hud.help(w.police.stars > 0 ? 'Lose the cops before racing.' : `Press E to start the Bayside Run (street race)${this.best ? `, best ${formatTime(this.best)}` : ''}.`);
+        if (input.hit('KeyE') && w.police.stars === 0) { input.consume('KeyE'); this.begin(); }
       }
       return;
     }

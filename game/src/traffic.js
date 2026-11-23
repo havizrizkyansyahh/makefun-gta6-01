@@ -1,7 +1,8 @@
 // Street life around the player: LaneDriver steers any car along the road graph in the right
-// lane (cruising, turning at intersections, braking for whatever is ahead, backing out when
-// stuck, or chasing / fleeing a target), and Traffic keeps a ring of moving cars, parked cars
-// and pedestrians alive around the player, spawning out of sight and removing far ones.
+// lane (cruising, turning at intersections, braking for whatever is ahead, easing through
+// flashing amber at night, backing out when stuck, or chasing / fleeing a target), and Traffic
+// keeps a ring of moving cars, parked cars and pedestrians alive around the player (around the
+// door he went in by, while he is indoors), spawning out of sight and removing far ones.
 import { CITY, TRAFFIC } from './config.js';
 import { Vehicle, MODELS, TRAFFIC_MIX } from './vehicles.js';
 import { Npc } from './npc.js';
@@ -121,11 +122,12 @@ export class LaneDriver {
     if (this.direct && targetSpeed < 6) want = tdist < 13 ? 0 : Math.min(want, 6 + tdist * 0.5);
 
     // stop at the line on red (and on amber when there is room to stop); police and the
-    // fleeing van run the lights
+    // fleeing van run the lights; on night-time flashing amber drivers ease through
     if (this.mode === 'traffic' && w.signals) {
       const light = w.signals.state(this.b, Math.abs(dx) > Math.abs(dz) ? 'x' : 'z');
       const stopAt = len - CITY.roadHalf - 3.2;
       const toLine = stopAt - proj;
+      if (light === 'flash' && toLine > -4 && toLine < 22) want = Math.min(want, 8);
       if (toLine > -0.5 && toLine < 40 && (light === 'red' || (light === 'amber' && toLine > 9))) {
         want = Math.min(want, Math.max(0, toLine * 0.55 - 0.3));
         this.waiting = true;
@@ -256,11 +258,12 @@ export class Traffic {
     this.timer -= dt;
     if (this.timer > 0 && !initial) return;
     this.timer = 0.5;
-    const c = w.player.vehicle ? w.player.vehicle.pos : w.player.pos;
-    // remove far traffic and pedestrians (never the player's car or story actors)
+    // indoors, the street outside the door is what stays alive
+    const c = w.mapPos ? w.mapPos() : w.player.where();
+    // remove far traffic and pedestrians (never the player's car, his own car or story actors)
     for (let i = w.vehicles.length - 1; i >= 0; i -= 1) {
       const v = w.vehicles[i];
-      if (v === w.player.vehicle || v.mission || v.kind === 'parked' || v.kind === 'police') continue;
+      if (v === w.player.vehicle || v.mission || v.kind === 'parked' || v.kind === 'police' || v.kind === 'personal' || v.kind === 'prop') continue;
       const d = Math.hypot(v.pos.x - c.x, v.pos.z - c.z);
       if (d > TRAFFIC.despawn || (v.dead && d > 120)) {
         v.remove();
@@ -292,7 +295,8 @@ export class Traffic {
         if (this.spawnCar(seg)) break;
       }
     }
-    const peds = w.npcs.filter((n) => n.role === 'civ' && !n.dead).length;
+    if (w.interior) return; // nobody is watching the street spawn while Kai is inside
+    const peds = w.npcs.filter((n) => n.role === 'civ' && !n.dead && !n.interior).length;
     const wantPeds = Math.round(TRAFFIC.peds * w.density);
     for (let k = 0; k < (initial ? wantPeds : 3) && peds + k < wantPeds; k += 1) {
       this.spawnPed(c, initial ? 8 : 70, initial ? 140 : 170);

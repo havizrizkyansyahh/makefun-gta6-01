@@ -1,5 +1,6 @@
-// Visual effects: pooled sprite particles (muzzle flash, sparks, smoke, fire, dust, hits),
-// bullet tracers, explosions with a light flash, and the camera shake value systems add to.
+// Visual effects: pooled sprite particles (muzzle flash, sparks, smoke, fire, dust, hits, the
+// garage's paint mist, firework embers, target splinters and bow spray), bullet tracers,
+// explosions and firework bursts with a light flash, and the camera shake systems add to.
 import * as THREE from '../vendor/three.module.min.js';
 import { glowTexture, smokeTexture } from './textures.js';
 
@@ -13,6 +14,13 @@ const KINDS = {
   fire: { tex: 'glow', life: 0.6, size: [1.3, 0.3], color: '#ff7b25', add: true, rise: 3.0, spread: 0.8 },
   blast: { tex: 'glow', life: 0.7, size: [3, 9], color: '#ffb347', add: true, rise: 2, spread: 9 },
   cash: { tex: 'glow', life: 0.8, size: [0.5, 0.1], color: '#6dff8a', add: true, rise: 3, spread: 1.5 },
+  // the garage's spray gun: a drifting mist in the new paint colour
+  spray: { tex: 'smoke', life: 1.3, size: [0.4, 2.2], color: '#ffffff', add: false, rise: 0.3, spread: 2.2 },
+  // fireworks over the bay: bright embers that fall and fade
+  ember: { tex: 'glow', life: 1.6, size: [0.9, 0.15], color: '#ffd27a', add: true, rise: -2.2, spread: 0 },
+  // a range target splintering, a boat's bow spray
+  chip: { tex: 'glow', life: 0.35, size: [0.18, 0.04], color: '#ffe6b0', add: true, rise: -8, spread: 5 },
+  splash: { tex: 'smoke', life: 0.9, size: [0.6, 2.4], color: '#e9f6ff', add: false, rise: -1.5, spread: 2.5 },
 };
 
 export class Effects {
@@ -46,14 +54,14 @@ export class Effects {
     this.cursor = 0;
   }
 
-  spawn(kind, x, y, z, count = 1, vel = null) {
+  spawn(kind, x, y, z, count = 1, vel = null, color = null) {
     const k = KINDS[kind];
     for (let n = 0; n < count; n += 1) {
       const p = this.pool[this.cursor];
       this.cursor = (this.cursor + 1) % this.pool.length;
       const s = p.sprite;
       s.material.map = this.tex[k.tex];
-      s.material.color.set(k.color);
+      s.material.color.set(color || k.color);
       s.material.blending = k.add ? THREE.AdditiveBlending : THREE.NormalBlending;
       s.material.opacity = 1;
       s.material.rotation = Math.random() * 6.28;
@@ -81,7 +89,26 @@ export class Effects {
     t.life = 0.07;
   }
 
+  /**
+   * A firework shell bursting at (x, y, z): embers thrown out on a sphere in one or two colours,
+   * with a flash of coloured light over the water.
+   */
+  burst(x, y, z, colors, count = 46) {
+    for (let n = 0; n < count; n += 1) {
+      const u = Math.random() * 2 - 1;
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.sqrt(1 - u * u);
+      const speed = 11 + Math.random() * 3;
+      this.spawn('ember', x, y, z, 1, { x: Math.cos(a) * r * speed, y: u * speed, z: Math.sin(a) * r * speed }, colors[n % colors.length]);
+    }
+    this.flashLight.color.set(colors[0]);
+    this.flashLight.position.set(x, y, z);
+    this.flashLight.intensity = 260;
+    this.flashTime = 0.35;
+  }
+
   explosion(x, y, z) {
+    this.flashLight.color.set('#ffae5c');
     this.spawn('blast', x, y + 1, z, 26);
     this.spawn('smoke', x, y + 1.5, z, 18);
     this.spawn('spark', x, y + 1, z, 30);

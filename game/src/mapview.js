@@ -1,7 +1,8 @@
 // The interactive city map in the pause menu. Scroll to zoom, drag to pan, hover a marker for its
 // card (the character's portrait or the place's badge, a description and the distance), click a
 // marker to zoom to it or anywhere else to drop a waypoint (right-click clears it). The GPS route
-// to the waypoint is drawn along the streets, here and on the minimap.
+// to the waypoint is drawn along the streets, here and on the minimap. The buildings with doors
+// get a ring under their badge; while Kai is indoors he shows at the door he went in by.
 import { DISTRICTS } from './city.js';
 import { CITY } from './config.js';
 
@@ -12,7 +13,7 @@ export class MapView {
     this.card = card;
     this.g = canvas.getContext('2d');
     this.zoom = 1;
-    const at = world.where();
+    const at = world.mapPos();
     this.cx = 0;
     this.cz = 0;
     this.focus(at.x * 0.3, at.z * 0.3, 1);
@@ -210,6 +211,12 @@ export class MapView {
       }
       if (icon) {
         const size = (bl.kind === 'contact' || bl.kind === 'target' ? 50 : bl.minor ? 30 : 38) * scale * (hovered ? 1.25 : 1);
+        if (bl.door) {
+          // a building Kai can walk into: a soft halo under the badge
+          g.beginPath(); g.arc(a, b, size * 0.62, 0, Math.PI * 2);
+          g.fillStyle = 'rgba(127,247,230,0.22)';
+          g.fill();
+        }
         g.drawImage(icon, a - size / 2, b - size / 2, size, size);
       } else {
         g.beginPath(); g.arc(a, b, 7 * scale, 0, Math.PI * 2); g.fillStyle = 'rgba(10,14,30,0.85)'; g.fill();
@@ -218,7 +225,7 @@ export class MapView {
     }
 
     // Kai: his portrait, with a pointer for the way he faces
-    const at = w.where();
+    const at = w.mapPos();
     const heading = w.player.vehicle ? w.player.vehicle.heading : w.player.heading;
     const [a, c] = this.toScreen(at.x, at.z);
     const ang = Math.atan2(Math.cos(heading), Math.sin(heading));
@@ -264,9 +271,10 @@ export class MapView {
     card.style.top = `${Math.max(8, b * k - 50)}px`;
     if (this.cardFor === bl.title) return;
     this.cardFor = bl.title;
-    const at = this.world.where();
+    const at = this.world.mapPos();
     const d = Math.round(Math.hypot(bl.x - at.x, bl.z - at.z));
     const url = bl.icon && this.world.hud.iconURL(bl.icon);
-    card.innerHTML = `${url ? `<img src="${url}">` : `<i style="background:${bl.color}"></i>`}<div><b>${bl.title || ''}</b><span>${bl.desc || ''}</span><em>${d} m away · click to zoom</em></div>`;
+    const where = d < 3 && this.world.interior ? 'you are inside' : `${d} m away`;
+    card.innerHTML = `${url ? `<img src="${url}">` : `<i style="background:${bl.color}"></i>`}<div><b>${bl.title || ''}</b><span>${bl.desc || ''}</span><em>${where}${bl.door ? ' · walk in through the door' : ''} · click to zoom</em></div>`;
   }
 }

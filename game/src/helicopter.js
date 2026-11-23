@@ -1,34 +1,46 @@
 // The SBPD helicopter: joins the chase from three stars, flies in from the edge of the city,
 // circles above the player with a searchlight (its sightings keep the wanted level alive), puts a
 // marksman in the door from four stars, and can be shot down, spinning into the ground in flames.
+// Channel 6 Bay News flies the same airframe in white and orange to film the story's finale.
 import * as THREE from '../vendor/three.module.min.js';
 import { mergeParts, mat4 } from './geometry.js';
 import { clamp, damp, wrapAngle } from './rng.js';
 
-let bodyGeo = null;
-function heliGeometry() {
-  if (bodyGeo) return bodyGeo;
+// two liveries: the SBPD's navy and white, and Channel 6 Bay News's white and orange
+const LIVERIES = {
+  police: { body: '#1c2541', fin: '#f4f4f4', stripe: '#f4f4f4' },
+  news: { body: '#f4f4f0', fin: '#ff7a1a', stripe: '#ff7a1a' },
+};
+const bodyGeos = new Map();
+function heliGeometry(livery = 'police') {
+  if (bodyGeos.has(livery)) return bodyGeos.get(livery);
+  const L = LIVERIES[livery];
   const P = [];
   const add = (geo, color, m) => P.push({ geo, color, matrix: m });
-  add(new THREE.SphereGeometry(1, 24, 16), '#1c2541', mat4(0, 0, 0.3, 1.25, 1.15, 2.1));              // cabin
+  add(new THREE.SphereGeometry(1, 24, 16), L.body, mat4(0, 0, 0.3, 1.25, 1.15, 2.1));              // cabin
   add(new THREE.SphereGeometry(1, 20, 12), '#9ec9ff', mat4(0, 0.2, 1.6, 0.95, 0.75, 0.85));          // canopy glass
-  add(new THREE.CylinderGeometry(0.22, 0.45, 5.2, 12), '#1c2541', mat4(0, 0.3, -3.4, 1, 1, 1, Math.PI / 2)); // boom
-  add(new THREE.BoxGeometry(0.12, 1.4, 0.9), '#f4f4f4', mat4(0, 1.0, -5.8));                          // fin
+  add(new THREE.CylinderGeometry(0.22, 0.45, 5.2, 12), L.body, mat4(0, 0.3, -3.4, 1, 1, 1, Math.PI / 2)); // boom
+  add(new THREE.BoxGeometry(0.12, 1.4, 0.9), L.fin, mat4(0, 1.0, -5.8));                          // fin
   add(new THREE.BoxGeometry(2.2, 0.1, 0.12), '#2f3338', mat4(0, -1.35, 1.0));                          // skid struts
   add(new THREE.BoxGeometry(2.2, 0.1, 0.12), '#2f3338', mat4(0, -1.35, -0.6));
   for (const s of [-1, 1]) add(new THREE.CapsuleGeometry(0.07, 3.6, 4, 8), '#2f3338', mat4(s * 1.05, -1.45, 0.2, 1, 1, 1, Math.PI / 2));
-  add(new THREE.BoxGeometry(2.6, 0.3, 0.05), '#f4f4f4', mat4(0, -0.25, 0.3, 1, 1, 46).multiply(mat4(0, 0, 0, 1, 1, 0.02)));
+  add(new THREE.BoxGeometry(2.6, 0.3, 0.05), L.stripe, mat4(0, -0.25, 0.3, 1, 1, 46).multiply(mat4(0, 0, 0, 1, 1, 0.02)));
   add(new THREE.CylinderGeometry(0.25, 0.3, 0.5, 10), '#2f3338', mat4(0, 1.25, 0.3));                 // rotor mast
-  bodyGeo = mergeParts(P, true);
-  return bodyGeo;
+  if (livery === 'news') add(new THREE.SphereGeometry(0.28, 12, 8), '#1a1c20', mat4(0, -1.05, 2.0)); // camera ball
+  const geo = mergeParts(P, true);
+  bodyGeos.set(livery, geo);
+  return geo;
 }
 
 export class Helicopter {
-  constructor(world, x, z) {
+  /** opts.news: Channel 6's camera ship, which circles opts.focus (or Kai) and never shoots. */
+  constructor(world, x, z, opts = {}) {
     this.world = world;
+    this.news = !!opts.news;
+    this.focus = opts.focus || null;
     this.group = new THREE.Group();
     const mat = new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.35, metalness: 0.4, clearcoat: 0.8 });
-    const body = new THREE.Mesh(heliGeometry(), mat);
+    const body = new THREE.Mesh(heliGeometry(this.news ? 'news' : 'police'), mat);
     body.castShadow = true;
     this.body = body;
     this.group.add(body);
@@ -56,7 +68,8 @@ export class Helicopter {
     // searchlight: a real spot light plus a soft visible beam
     this.spot = new THREE.SpotLight('#fff6dd', 0, 140, 0.22, 0.6, 1.2);
     this.spot.position.set(0, -1.2, 1.4);
-    this.group.add(this.spot);
+    // the news ship carries a camera, not a searchlight (and adds no light to the scene)
+    if (!this.news) this.group.add(this.spot);
     world.scene.add(this.spot.target);
     const beamGeo = new THREE.ConeGeometry(4.5, 1, 24, 1, true);
     beamGeo.translate(0, -0.5, 0);
@@ -101,7 +114,7 @@ export class Helicopter {
 
   update(dt) {
     const w = this.world;
-    const target = w.player.where();
+    const target = this.focus || w.player.where();
     this.rotor.rotation.y += dt * (this.falling ? 14 : 28);
     this.tail.rotation.x += dt * 40;
     this.nav.visible = Math.floor(w.time * 1.5) % 2 === 0;
@@ -161,7 +174,7 @@ export class Helicopter {
 
     // the marksman
     this.cooldown -= dt;
-    if (!this.leave && w.police.stars >= 4 && this.cooldown <= 0 && !w.player.dead) {
+    if (!this.news && !this.leave && w.police.stars >= 4 && this.cooldown <= 0 && !w.player.dead) {
       this.cooldown = 1.6 + Math.random() * 1.2;
       const p = w.player;
       const tp = p.vehicle ? p.vehicle.pos : p.pos;
@@ -194,7 +207,7 @@ export class Helicopter {
     this.beam.scale.set(1, len, 1);
     this.beam.lookAt(this.light);
     this.beam.rotateX(-Math.PI / 2);
-    this.beam.visible = this.alive && !this.leave && this.world.sky.night > 0.4;
+    this.beam.visible = !this.news && this.alive && !this.leave && this.world.sky.night > 0.4;
     this.beam.material.opacity = 0.012 + Math.max(0, this.world.sky.night - 0.3) * 0.12;
   }
 

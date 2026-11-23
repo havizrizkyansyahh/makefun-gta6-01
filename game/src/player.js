@@ -1,6 +1,6 @@
 // Kai Moreno, the player: walking, sprinting and jumping relative to the camera, aiming and
 // shooting through the crosshair, punching, switching and reloading weapons, getting into any
-// car (pulling the driver out if there is one), driving it, and bailing out.
+// car (pulling the driver out if there is one), driving it, bailing out, and changing clothes.
 import { Human, LOOKS } from './human.js';
 import { PLAYER } from './config.js';
 import { WEAPONS, WEAPON_ORDER, traceShot, jitter } from './combat.js';
@@ -36,9 +36,22 @@ export class Player {
       pistol: { owned: true, ammo: 36, clip: 12 },
       smg: { owned: false, ammo: 0, clip: 0 },
       shotgun: { owned: false, ammo: 0, clip: 0 },
+      carbine: { owned: false, ammo: 0, clip: 0 },
     };
     this.current = 'fist';
     this.human.setWeapon(null);
+  }
+
+  /** Dress Kai in a new look (an outfit from Threadline or the wardrobe): rebuild his model. */
+  setLook(look) {
+    const old = this.human;
+    const visible = old.root.visible;
+    this.world.scene.remove(old.root);
+    this.human = new Human(look);
+    this.human.root.visible = visible;
+    this.human.setWeapon(this.current === 'fist' ? null : this.current);
+    this.world.scene.add(this.human.root);
+    this.sync();
   }
 
   where() { return this.vehicle ? this.vehicle.pos : this.pos; }
@@ -226,6 +239,12 @@ export class Player {
     for (let k = 0; k < pellets; k += 1) {
       const [dx, dy, dz] = jitter(d.x, d.y, d.z, spread);
       const r = traceShot(w, this, ox, oy, oz, dx, dy, dz, spec.range);
+      // the range's pop-up boards stand in front of the back wall: they take the round first
+      const target = w.activities && w.activities.onShot(ox, oy, oz, dx, dy, dz, r.t);
+      if (target) {
+        w.fx.tracer(mx, my, mz, ox + dx * target.t, oy + dy * target.t, oz + dz * target.t);
+        continue;
+      }
       const hx = ox + dx * r.t;
       const hy = oy + dy * r.t;
       const hz = oz + dz * r.t;
@@ -312,16 +331,19 @@ export class Player {
   /** Get into the nearest car within reach, pulling out whoever is driving it. */
   tryEnter() {
     const w = this.world;
+    // the nearest unlocked vehicle in reach (big ones reach further: a yacht's side, a van's door)
     let best = null;
-    let bd = 4.2;
+    let bd = Infinity;
+    let locked = false;
     for (const v of w.vehicles) {
       if (v.dead) continue;
-      const d = Math.hypot(v.pos.x - this.pos.x, v.pos.z - this.pos.z);
+      const d = Math.hypot(v.pos.x - this.pos.x, v.pos.z - this.pos.z) - Math.max(0, v.spec.wid / 2 - 1);
+      if (d > 4.2) continue;
+      if (v.locked) { locked = true; continue; }
       if (d < bd) { bd = d; best = v; }
     }
-    if (!best) return;
+    if (!best) { if (locked) w.hud.notify('This one is locked.'); return; }
     const v = best;
-    if (v.locked) { w.hud.notify('This one is locked.'); return; }
     if (v.driver && v.driver !== 'player') {
       // carjack: the driver is thrown out on the kerb side and runs
       const sx = v.spec.wid / 2 + 0.8;
@@ -339,7 +361,7 @@ export class Player {
     v.driver = 'player';
     v.ai = null;
     v.crew = 0;
-    if (v.kind !== 'police') v.kind = 'player';
+    if (v.kind !== 'police' && v.kind !== 'personal') v.kind = 'player';
     v.input.throttle = 0;
     v.input.handbrake = false;
     this.vehicle = v;

@@ -1,7 +1,7 @@
 // Weather over the bay: mostly sunshine, with passing showers. Rain is thousands of streaks that
 // follow the camera, the sky clouds over and the sun dims, fog closes in, roads and pavements go
 // dark and glossy (they mirror the sky and every headlight), rain hisses, and night storms throw
-// lightning with thunder a moment later.
+// lightning with thunder a moment later. Indoors the rain is only a muffled patter on the roof.
 import * as THREE from '../vendor/three.module.min.js';
 
 const DROPS = 5000;
@@ -51,9 +51,10 @@ export class Weather {
 
     // streaks fall around the camera, slanted by the sea breeze
     const cam = w.camera.position;
+    const indoor = !!w.interior;
     this.lines.position.set(cam.x, cam.y - 12, cam.z);
     this.lines.material.opacity = this.rain * 0.55;
-    this.lines.visible = this.rain > 0.02;
+    this.lines.visible = this.rain > 0.02 && !indoor;
     if (this.lines.visible) {
       const a = this.lines.geometry.attributes.position.array;
       for (let i = 0; i < DROPS; i += 1) {
@@ -79,12 +80,14 @@ export class Weather {
       this.thunder -= dt;
       if (this.thunder <= 0) w.audio.thunder();
     }
-    if (w.post) w.post.composite.uniforms.uFlash.value = this.flash * this.flash * 0.35;
-    w.audio.rain(this.rain);
+    // indoors the storm is a muffled patter on the roof and the lightning a glow at the door
+    if (w.post) w.post.composite.uniforms.uFlash.value = this.flash * this.flash * (indoor ? 0.05 : 0.35);
+    w.audio.rain(this.rain * (indoor ? 0.3 : 1));
   }
 
   /** Dim the sun, thicken the cloud and pull the fog in to match the rain. */
   applyToSky(sky, scene) {
+    if (sky.indoor) return;
     const r = this.rain;
     sky.uniforms.uCloud.value = 0.35 + r * 0.9;
     sky.sun.intensity *= 1 - r * 0.75;

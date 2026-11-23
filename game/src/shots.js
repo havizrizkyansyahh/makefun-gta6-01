@@ -1,6 +1,8 @@
-// The screenshot scenes behind ?shot=cover|combat|city|title. Each one builds the real world
-// from its seed, sets up a moment of play (a mission step, a wanted level, a car or a gun in
-// hand), runs the actual simulation forward with a simple autopilot standing in for the
+// The screenshot scenes behind ?shot=cover|crowd|map|title (the four in shots.json) and the
+// extra ones used to check the newer places: combat, city, night, garage, apartment, laundry,
+// range, boutique, yacht and buoys. Each one builds the real world from its seed, sets up a
+// moment of play (a mission step, a wanted level, a car or a gun in hand, a room, a shop
+// screen), runs the actual simulation forward with a simple autopilot standing in for the
 // player, then renders and sets window.__shotReady so a capture tool can take the frame.
 import { LaneDriver } from './traffic.js';
 import { Vehicle, MODELS } from './vehicles.js';
@@ -13,15 +15,19 @@ const STEP = 1 / 30;
 /** Input stand-in: the autopilot presses keys by name. */
 function fakeInput() {
   const held = new Set();
+  const pressed = new Set();
   return {
     held,
+    pressed,
     mouseDX: 0, mouseDY: 0, wheel: 0, locked: true, enabled: true,
     down: (c) => held.has(c),
-    hit: () => false,
+    hit: (c) => pressed.has(c),
     mouse: (b) => held.has(`M${b}`),
     mouseHit: (b) => held.has(`M${b}`),
     axis(neg, pos) { return (held.has(pos) ? 1 : 0) - (held.has(neg) ? 1 : 0); },
-    endFrame() {},
+    consume: (c) => pressed.delete(c),
+    hitAny: (...codes) => codes.some((c) => pressed.has(c)),
+    endFrame() { pressed.clear(); },
   };
 }
 
@@ -30,6 +36,16 @@ function run(world, input, seconds, each) {
   for (let i = 0; i < n; i += 1) {
     if (each) each(i * STEP);
     world.step(STEP, input);
+    input.endFrame();
+  }
+}
+
+/** Press keys for one step each, in order (the autopilot working a shop screen). */
+function tap(world, input, ...codes) {
+  for (const c of codes) {
+    input.pressed.add(c);
+    world.step(STEP, input);
+    input.endFrame();
   }
 }
 
@@ -65,7 +81,8 @@ export async function stageShot(name, world, { menu, hud }) {
     const a = city.nodeId(4, j);
     const b = city.nodeId(3, j);
     const car = world.traffic.spawnCar({ a, b, t: 0.1 }, 'ardent');
-    car.parts.paint.color.set('#e63946');
+    // Kai's own Ardent, fresh out of Torque & Tide: coral paint, gold rims, teal underglow
+    car.applyMods({ color: '#e63946', rims: '#ffc84a', neon: '#2de2ff', engine: 2, tint: 1 });
     car.driver = null;
     world.player.tryEnterVehicle = null;
     world.player.pos.x = car.pos.x; world.player.pos.z = car.pos.z;
@@ -195,6 +212,11 @@ export async function stageShot(name, world, { menu, hud }) {
     p.place(t.x + 4, t.z + 33, Math.PI);
     p.give('pistol', 48);
     p.select('pistol');
+    // dressed from Threadline: olive bomber, chalk tee, sand chinos, teal cap, shades
+    const o = world.outfits;
+    for (const id of ['bomber-olive', 'tee-chalk', 'chinos-sand', 'cap-teal', 'shades']) o.owned.add(id);
+    Object.assign(o.equipped, { jacket: 'bomber-olive', top: 'tee-chalk', legs: 'chinos-sand', head: 'cap-teal', eyes: 'shades' });
+    o.apply();
     const rng = world.rng;
     const loops = city.loops.filter((l) => Math.abs((l.x0 + l.x1) / 2 - t.x) < 100 && Math.abs((l.z0 + l.z1) / 2 - t.z) < 100);
     for (let k = 0; k < 70; k += 1) {
@@ -254,10 +276,79 @@ export async function stageShot(name, world, { menu, hud }) {
     view.mouse = { x: mx, y: my };
     await new Promise((r) => setTimeout(r, 400));
   }
+  else if (name === 'garage') {
+    // a Bayrunner on the Torque & Tide turntable at sunset, mid-respray
+    world.newGame();
+    world.hour = 18.2;
+    const p = world.player;
+    const b = world.garage.bayPos;
+    const car = new Vehicle(world.scene, 'bayrunner', '#fb8500', b.x, b.z, 0);
+    car.y = world.city.groundHeight(b.x, b.z);
+    world.vehicles.push(car);
+    world.money = 9000;
+    p.pos.x = b.x + 1.5; p.pos.z = b.z;
+    p.tryEnter();
+    run(world, input, 0.4);
+    tap(world, input, 'KeyE', 'KeyS', 'KeyD', 'KeyD', 'Enter', 'KeyS', 'KeyS', 'KeyS', 'KeyS', 'KeyD', 'KeyD', 'Enter', 'KeyS', 'KeyS', 'KeyD', 'KeyD');
+    run(world, input, 1.2);
+  } else if (['apartment', 'laundry', 'boutique'].includes(name)) {
+    world.newGame();
+    world.hour = 19.5;
+    world.interiors.enter(name, { silent: true });
+    const p = world.player;
+    if (name === 'boutique') {
+      const r = world.interiors.get('boutique');
+      p.place(r.X(6.2), r.Z(-4.0), Math.PI);
+      world.money = 2000;
+      world.outfits.openStore();
+      tap(world, input, 'KeyD', 'KeyS', 'KeyS');
+    } else {
+      world.rig.yaw = Math.PI + 0.4;
+      world.rig.pitch = 0.15;
+    }
+    run(world, input, 1.5);
+  } else if (name === 'range') {
+    // a range session in full swing, Viper in hand down lane 4
+    world.newGame();
+    const p = world.player;
+    p.give('smg', 300);
+    p.select('smg');
+    const r = world.interiors.get('gunshop');
+    world.interiors.enter('gunshop', { silent: true, at: { x: r.booth.x, z: 1.0, face: Math.PI } });
+    world.money = 500;
+    world.activities.range.start();
+    input.held.add('M2');
+    run(world, input, 4, (t) => {
+      const up = world.activities.range.targets.find((x) => x.want > 0 && x.up > 0.9 && !x.friendly);
+      if (up) {
+        // aim the crosshair (the camera's line, beside Kai's shoulder) at the board
+        const c = world.camera.position;
+        world.rig.yaw = Math.atan2(up.x - c.x, up.z - c.z);
+        world.rig.pitch = -Math.atan2(1.35 - c.y, Math.hypot(up.x - c.x, up.z - c.z));
+      }
+      if (Math.floor(t * 3) % 2 === 0) input.held.add('M0'); else input.held.delete('M0');
+    });
+  } else if (name === 'yacht' || name === 'buoys') {
+    world.newGame();
+    world.hour = name === 'yacht' ? 17.4 : 15.5;
+    const p = world.player;
+    if (name === 'yacht') startMission(world, 'low-tide', 1);
+    const y = name === 'yacht' ? world.missions.active.ctx.data.yacht : null;
+    const st = world.city.places.buoyRun;
+    const boat = new Vehicle(world.scene, 'marisol', '#f4f4f0', y ? y.pos.x + 9 : st.x, y ? y.pos.z - 26 : st.z, 0);
+    world.vehicles.push(boat);
+    p.pos.x = boat.pos.x; p.pos.z = boat.pos.z;
+    p.tryEnter();
+    if (name === 'buoys') { world.activities.buoys.begin(); world.activities.buoys.active.countdown = 0; }
+    p.select('pistol');
+    input.held.add('KeyW');
+    run(world, input, 3, () => { world.rig.yaw = boat.heading + 0.25; world.rig.pitch = 0.16; world.rig.idle = 0; });
+  }
   // only the play itself in the frame: no leftover title cards or notices
   hud.el.notes.innerHTML = '';
   hud.bigT = 0;
   hud.el.big.classList.remove('on');
+  hud.el.fade.style.opacity = '0';
   void Vehicle; void MODELS; void Npc;
   world.render();
   hud.update(0);
