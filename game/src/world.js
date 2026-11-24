@@ -11,6 +11,10 @@ import { Outfits } from './outfits.js';
 import { Garage } from './garage.js';
 import { Activities } from './activities.js';
 import { Wildlife } from './wildlife.js';
+import { Turf } from './turf.js';
+import { Nightclub } from './nightclub.js';
+import { Dealership } from './dealership.js';
+import { StreetEvents } from './streetevents.js';
 import { WEAPON_ORDER } from './combat.js';
 import { Signals } from './signals.js';
 import { Weather } from './weather.js';
@@ -68,11 +72,16 @@ export class World {
     this.missions = new Missions(this);
     this.interior = null;
     this.ui = null;
+    // the club's state exists before its room is built: the room's animation reads its beat
+    this.club = new Nightclub(this);
     this.interiors = new Interiors(this);
     this.outfits = new Outfits(this);
     this.garage = new Garage(this);
     this.activities = new Activities(this);
     this.wildlife = new Wildlife(this);
+    this.dealer = new Dealership(this);
+    this.turf = new Turf(this);
+    this.streetEvents = new StreetEvents(this);
     this.money = 250;
     this.hour = START_HOUR;
     this.time = 0;
@@ -170,6 +179,7 @@ export class World {
 
   onNpcKilled(npc) {
     this.stats.kills += 1;
+    if (this.turf) this.turf.onKilled(npc);
     if (npc.role === 'cop') this.stats.cops += 1;
     const r = this.rng;
     if (npc.role === 'cop' || npc.role === 'saint') {
@@ -293,6 +303,7 @@ export class World {
     // keys) before Kai's own controls do, and swallow what they use
     this.interiors.update(dt, input);
     this.garage.update(dt, input);
+    this.dealer.update(dt, this.ui ? IDLE : input);
     p.update(dt, this.ui ? IDLE : input, this.rig);
     if (this.ui) this.ui.update(dt, input);
     this.signals.update(dt, this.hour);
@@ -319,6 +330,9 @@ export class World {
     this.missions.update(dt, this.ui ? IDLE : input);
     this.activities.update(dt, this.ui ? IDLE : input);
     this.wildlife.update(dt);
+    this.club.update(dt);
+    this.turf.update(dt);
+    this.streetEvents.update(dt, this.ui ? IDLE : input);
     this.collectPickups(dt);
     this.fx.update(dt);
     if (this.post) this.post.grade(dt, p.dead ? 0.85 : 0, this.interior ? 1 : 0);
@@ -634,6 +648,10 @@ export class World {
       outfits: this.outfits.serialize(),
       garage: this.garage.serialize(),
       activities: this.activities.serialize(),
+      turf: this.turf.serialize(),
+      club: this.club.serialize(),
+      dealer: this.dealer.serialize(),
+      events: this.streetEvents.serialize(),
       race: { best: this.missions.race.best ?? null },
     };
   }
@@ -680,6 +698,10 @@ export class World {
     this.outfits.restore(data.outfits);
     this.garage.restore(data.garage);
     this.activities.restore(data.activities);
+    this.turf.restore(data.turf);
+    this.club.restore(data.club);
+    this.dealer.restore(data.dealer);
+    this.streetEvents.restore(data.events);
     if (data.race && data.race.best) this.missions.race.best = data.race.best;
     p.select(p.weapons[data.player.current]?.owned ? data.player.current : 'fist');
     this.populate();

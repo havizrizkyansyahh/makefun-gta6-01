@@ -681,6 +681,9 @@ export class Missions {
     if (w.interiors) out.push(...w.interiors.blips());
     if (w.garage) out.push(...w.garage.blips());
     if (w.activities) out.push(...w.activities.blips());
+    if (w.turf) out.push(...w.turf.blips());
+    if (w.dealer) out.push(...w.dealer.blips());
+    if (w.streetEvents) out.push(...w.streetEvents.blips());
     for (const f of this.fixed) {
       const info = PLACE_INFO[f.key];
       out.push({ x: f.marker.x, z: f.marker.z, color: pl[f.key].color, kind: 'place', icon: info.icon, title: info.title, desc: info.desc });

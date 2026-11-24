@@ -235,7 +235,9 @@ export class Player {
     const mz = this.pos.z + Math.cos(this.heading) * 0.6 - Math.sin(this.heading) * -0.25;
     const my = this.y + 1.45;
     const pellets = spec.pellets || 1;
-    const spread = spec.spread * (this.aiming ? 0.5 : 1.4) * (1 + this.moveSpeed * 0.08);
+    // a Lighthouse Black from The Undertow's bar steadies the hands for a couple of minutes
+    const steady = w.club ? w.club.aimSteady() : 1;
+    const spread = spec.spread * (this.aiming ? 0.5 : 1.4) * (1 + this.moveSpeed * 0.08) * steady;
     for (let k = 0; k < pellets; k += 1) {
       const [dx, dy, dz] = jitter(d.x, d.y, d.z, spread);
       const r = traceShot(w, this, ox, oy, oz, dx, dy, dz, spec.range);

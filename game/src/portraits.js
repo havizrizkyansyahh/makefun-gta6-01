@@ -173,6 +173,34 @@ function placeIcon(kind, color) {
       g.fillStyle = '#ffffff'; g.beginPath(); g.arc(80, 86, 13, 0, Math.PI * 2); g.fill();
       g.fillStyle = color; g.fillRect(56, 46, 12, 8); g.fillRect(74, 46, 6, 8);
       break;
+    case 'turf':
+      // a spray can: the tag a crew leaves on its corner
+      g.fillRect(62, 56, 36, 66);
+      g.fillRect(70, 44, 20, 12);
+      g.fillStyle = color; g.fillRect(62, 74, 36, 14);
+      g.fillStyle = '#ffffff';
+      for (const [x, y] of [[104, 40], [114, 50], [108, 30], [120, 36]]) { g.beginPath(); g.arc(x, y, 4, 0, Math.PI * 2); g.fill(); }
+      break;
+    case 'crown':
+      poly([[40, 116], [40, 58], [62, 82], [80, 44], [98, 82], [120, 58], [120, 116]]);
+      g.fillStyle = color; g.fillRect(48, 100, 64, 8);
+      break;
+    case 'note':
+      g.fillRect(92, 38, 8, 64);
+      poly([[92, 38], [124, 50], [124, 62], [100, 52]]);
+      g.beginPath(); g.ellipse(80, 104, 20, 15, -0.4, 0, Math.PI * 2); g.fill();
+      break;
+    case 'car':
+      poly([[36, 96], [44, 74], [60, 58], [104, 58], [118, 74], [126, 96], [126, 108], [36, 108]]);
+      g.fillStyle = color;
+      poly([[62, 64], [102, 64], [112, 76], [52, 76]]);
+      g.fillStyle = '#1a1a1a';
+      for (const x of [56, 106]) { g.beginPath(); g.arc(x, 108, 11, 0, Math.PI * 2); g.fill(); }
+      break;
+    case 'alert':
+      poly([[80, 34], [126, 118], [34, 118]]);
+      g.fillStyle = color; g.fillRect(75, 62, 10, 32); g.fillRect(75, 100, 10, 10);
+      break;
     default:
       g.beginPath(); g.arc(80, 80, 24, 0, Math.PI * 2); g.fill();
   }
@@ -210,5 +238,10 @@ export function makeIcons(renderer) {
   icons.police = placeIcon('badge', '#5c8dff');
   icons.objective = placeIcon('objective', '#ffd23f');
   icons.waypoint = placeIcon('waypoint', '#b14dff');
+  icons.turf = placeIcon('turf', '#ff4d4d');
+  icons.crown = placeIcon('crown', '#ffb000');
+  icons.note = placeIcon('note', '#ff3df0');
+  icons.car = placeIcon('car', '#4fd1ff');
+  icons.alert = placeIcon('alert', '#6dff8a');
   return icons;
 }

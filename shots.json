@@ -1,6 +1,6 @@
 [
   { "name": "1-cover.jpg", "query": "?shot=cover&seed=7", "about": "A police chase with air support down the beach boulevard at sunset, in Kai's own modded Ardent" },
-  { "name": "2-crowd.jpg", "query": "?shot=crowd&seed=7", "about": "Sunstone Plaza in the afternoon, Kai dressed from Threadline Outfitters" },
-  { "name": "3-map.jpg", "query": "?shot=map&seed=7", "about": "The city map: portraits, shops with doors, the garage, activities and a GPS route" },
+  { "name": "2-crowd.jpg", "query": "?shot=club&seed=7", "about": "A packed dance floor at The Undertow nightclub, with Kai playing a DJ set on the decks" },
+  { "name": "3-map.jpg", "query": "?shot=map&seed=7", "about": "The city map: gang turf by district, portraits, shops with doors, the club, the dealership and a GPS route" },
   { "name": "4-title.jpg", "query": "?shot=title&seed=7", "about": "The title screen over the bay" }
 ]

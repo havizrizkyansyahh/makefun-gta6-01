@@ -16,6 +16,7 @@ import { Human, LOOKS } from './human.js';
 import { floorTexture, wallTexture, windowViewTexture, labelTexture, liveTexture } from './textures.js';
 import { pottedPlant } from './trees.js';
 import { DoorMarker } from './markers.js';
+import { CLUB_DEF } from './nightclub.js';
 
 const furnitureMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.66, metalness: 0.05, envMapIntensity: 0.55 });
 const glowMat = new THREE.MeshBasicMaterial({ vertexColors: true });
@@ -496,6 +497,9 @@ const DEFS = {
     },
   },
 };
+
+// the fifth door: The Undertow, defined with the club's own logic in nightclub.js
+DEFS.club = CLUB_DEF;
 
 const h = (r) => r.h;
 

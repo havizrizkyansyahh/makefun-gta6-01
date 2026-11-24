@@ -201,7 +201,7 @@ export class Menu {
         ? ['hollis', 'Captain Hollis', 'SBPD. The name on every page of the ledger.', hollisDone ? 'In custody' : 'Wanted: by you']
         : ['halo', finale ? 'Halo Calder' : '???', finale ? 'Boss of the Glass Saints, up in Corvel Heights.' : 'Whoever runs the Glass Saints.', haloDone ? 'Dead' : finale ? 'Wanted: by you' : 'Unknown'],
     ];
-    const legend = [['house', "Kai's apartment"], ['gun', 'Coastline Arms'], ['laundry', 'Spin City Laundry'], ['shirt', 'Threadline Outfitters'], ['wrench', 'Torque & Tide'], ['box', 'Bayline Couriers'], ['flag', 'Bayside Run'], ['buoy', 'Buoy Run'], ['hospital', 'St. Amara Medical'], ['police', 'Solmara Bay PD'], ['objective', 'Objective'], ['waypoint', 'Waypoint']];
+    const legend = [['house', "Kai's apartment"], ['gun', 'Coastline Arms'], ['laundry', 'Spin City Laundry'], ['shirt', 'Threadline Outfitters'], ['wrench', 'Torque & Tide'], ['box', 'Bayline Couriers'], ['flag', 'Bayside Run'], ['buoy', 'Buoy Run'], ['hospital', 'St. Amara Medical'], ['police', 'Solmara Bay PD'], ['note', 'The Undertow'], ['car', 'Brightwater Motors'], ['crown', 'Your turf'], ['turf', 'Gang corner'], ['alert', 'Street event'], ['objective', 'Objective'], ['waypoint', 'Waypoint']];
     this.push({
       kind: 'map',
       body: `<div class="mapwrap">
@@ -216,7 +216,7 @@ export class Menu {
           ${obj ? `<div class="mapobj"><b>${obj.title}</b><span>${obj.text}</span></div>` : ''}
           <div class="people">${people.map(([icon, name, role, status]) => `<div class="person"><img class="${name === '???' ? 'unknown' : ''}" src="${hud.iconURL(icon)}"><div><b>${name}</b><span>${role}</span><em>${status}</em></div></div>`).join('')}</div>
           <div class="maplegend">${legend.map(([icon, t]) => `<div><img src="${hud.iconURL(icon)}">${t}</div>`).join('')}</div>
-          <div class="mapstats"><span>Story <b>${done}/${MISSIONS.length}</b></span><span>Sun Shells <b>${world.missions.shellsFound.size}/12</b></span></div>
+          <div class="mapstats"><span>Story <b>${done}/${MISSIONS.length}</b></span><span>Sun Shells <b>${world.missions.shellsFound.size}/12</b></span><span>Turf <b>${world.turf.ownedCount()}/6</b></span></div>
         </div></div>`,
       items: [{ label: 'Back', action: () => this.back() }],
       after: (root) => {
@@ -254,6 +254,10 @@ export class Menu {
       ['Threadline Outfitters', 'Tops, jackets, trousers, shoes, hats, shades and gold.', `${world.outfits.count()} / ${world.outfits.total()} pieces`],
       ['Your car', 'Keep a car at Torque & Tide and it waits outside the apartment.', g.personal ? MODELS[g.personal.model].name : 'none yet'],
       ['Sun Shells', 'Twelve hidden around the city.', `${world.missions.shellsFound.size} / 12`],
+      ['Turf wars', 'Kill a gang member on their own corner to go to war for the district.', `${world.turf.ownedCount()} / 6 districts`, `${dollars(world.turf.dailyTake())} a morning`],
+      ['The Undertow', 'Nightclub in Little Marisco: the bar, a DJ set on the decks, a share from Mara.', world.club.best ? `best set ${world.club.best}` : 'no set yet', world.club.owned ? 'part-owner' : ''],
+      ['Brightwater Motors', 'Dealership in Harbor Flats. Buy a car or take one for a test drive.', `${world.dealer.sold} bought`],
+      ['Street events', 'Bag snatches, car fires, lost dogs and buskers, between missions.', `${world.streetEvents.helped} helped`],
     ];
     this.push({
       kind: 'info',
@@ -276,6 +280,12 @@ export class Menu {
       ['Garage work done', s.mods || 0],
       ['Clothes bought', s.clothes || 0],
       ['Doors walked through', s.visits || 0],
+      ['Districts taken', world.turf.taken],
+      ['Turf defended / lost', `${world.turf.defended} / ${world.turf.lost}`],
+      ['DJ sets played', world.club.sets],
+      ['Drinks at The Undertow', world.club.drinks],
+      ['Cars bought', world.dealer.sold],
+      ['Good deeds', world.streetEvents.helped],
       ['Takedowns', s.kills],
       ['Officers down', s.cops],
       ['Crashes', s.crashes],

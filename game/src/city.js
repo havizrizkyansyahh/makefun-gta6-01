@@ -187,6 +187,8 @@ export class City {
       pierEnd: { x: PIER.x, z: PIER.z1 - 6, label: 'End of the pier' },
       boutique: { ...front(4, 7, 's'), label: 'Threadline Outfitters', blip: 'T', color: '#c77dff' },
       buoyRun: { x: PIER.x + 26, z: PIER.z1 + 8, label: 'Buoy Run', color: '#3fb6c9' },
+      // the basement club on the Little Marisco waterfront
+      club: { ...front(8, 7, 's'), label: 'The Undertow', blip: 'U', color: '#ff3df0' },
     };
     const pl = this.places;
     pl.laundryDoor = { x: pl.pearl.x + 7, z: pl.pearl.z, face: pl.pearl.face, label: 'Spin City Laundry', color: '#ff5fa2' };
@@ -762,7 +764,7 @@ export class City {
     this.group.add(poles, heads);
 
     // shop signs for the places the story uses
-    for (const key of ['pearl', 'safehouse', 'gunshop', 'courier', 'hospital', 'precinct', 'boutique']) {
+    for (const key of ['pearl', 'safehouse', 'gunshop', 'courier', 'hospital', 'precinct', 'boutique', 'club']) {
       const p = this.places[key];
       const sign = makeSign(p.label.replace(' (save)', ''), p.color);
       // set the sign against the building face behind the sidewalk point

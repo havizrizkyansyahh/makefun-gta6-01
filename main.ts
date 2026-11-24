@@ -5,7 +5,8 @@
 // it in: it copies game/ and the four screenshots named in shots.json from beside this file to
 // /output and writes /output/dossier.json, the summary the judge reads, with the vendored make.fun
 // library. The screenshots are real renders of the game's own ?shot= scenes, taken by
-// tools/capture.mjs; a missing one is reported rather than silently skipped.
+// tools/capture.mjs; a missing one is reported rather than silently skipped. The second one is now
+// The Undertow nightclub's dance floor (?shot=club), and the map shows the gang turf of each district.
 //
 // Serve it locally with `node serve.ts`, then open http://localhost:8080.
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:

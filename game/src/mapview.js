@@ -165,6 +165,9 @@ export class MapView {
       g.globalAlpha = 1;
     }
 
+    // gang turf: every block tinted in the colours of the crew that runs it
+    if (w.turf) w.turf.drawMap(g, this);
+
     // GPS route to the waypoint
     const wp = w.waypoint;
     if (wp && wp.route && wp.route.length > 1) {

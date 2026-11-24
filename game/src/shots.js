@@ -328,6 +328,48 @@ export async function stageShot(name, world, { menu, hud }) {
       }
       if (Math.floor(t * 3) % 2 === 0) input.held.add('M0'); else input.held.delete('M0');
     });
+  } else if (name === 'club') {
+    // The Undertow at full tilt: Kai on the floor in the middle of the crowd, a DJ set running
+    world.newGame();
+    world.hour = 23.4;
+    const r = world.interiors.get('club');
+    world.interiors.enter('club', { silent: true, at: { x: 2.2, z: 3.6, face: Math.PI } });
+    world.player.place(r.X(2.2), r.Z(3.6), Math.PI + 0.2);
+    world.club.startSet();
+    // play the opening bars well, so the crowd's hype is up and the LED wall shows a score
+    run(world, input, 9, () => {
+      const set = world.club.set;
+      if (!set) return;
+      for (const n of set.notes) {
+        // the note reaches the line during the coming step: press now
+        if (n.state || n.t - set.t < 0 || n.t - set.t > STEP * 1.5) continue;
+        input.pressed.add(['ArrowLeft', 'ArrowDown', 'ArrowUp', 'ArrowRight'][n.lane]);
+      }
+      world.rig.yaw = Math.PI + 0.32;
+      world.rig.pitch = 0.1;
+      world.rig.idle = 0;
+    });
+  } else if (name === 'dealer' || name === 'turf') {
+    world.newGame();
+    world.hour = 15.2;
+    const p = world.player;
+    if (name === 'dealer') {
+      const d = world.dealer;
+      p.place(d.lot.x1 - 4, d.lot.z0 + 28, -Math.PI / 2);
+      world.rig.yaw = -Math.PI / 2 - 0.5;
+    } else {
+      // a turf war on the Coyotes' corner in Little Marisco
+      world.godMode = true;
+      p.give('smg', 300);
+      p.select('smg');
+      const c = world.turf.corners.marisco;
+      p.place(c.x + 6, c.z + 10, Math.PI);
+      run(world, input, 0.5);
+      world.turf.startWar('marisco');
+      world.rig.yaw = Math.PI + 0.35;
+    }
+    world.rig.pitch = 0.12;
+    run(world, input, 2, () => { world.rig.idle = 0; });
   } else if (name === 'yacht' || name === 'buoys') {
     world.newGame();
     world.hour = name === 'yacht' ? 17.4 : 15.5;
